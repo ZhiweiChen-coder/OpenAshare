@@ -73,7 +73,8 @@ def generate_trading_signals(df: pd.DataFrame) -> List[str]:
         logger.error(error_msg)
         signals.append(error_msg)
 
-    return signals if signals else ["当前无明显交易信号"]
+    # If no strong triggers fired, still provide a softer, readable takeaway.
+    return signals if signals else [_analyze_trend_takeaway(df)]
 
 
 def _analyze_macd(df: pd.DataFrame) -> str:
@@ -89,6 +90,11 @@ def _analyze_macd(df: pd.DataFrame) -> str:
             return "MACD金叉形成，可能上涨"
         elif current_macd < 0 <= prev_macd:
             return "MACD死叉形成，可能下跌"
+        # Softer signals: histogram turning up/down near zero often precedes a cross.
+        if abs(current_macd) < 0.15 and current_macd > prev_macd:
+            return "MACD接近零轴且动能回升，留意上攻延续"
+        if abs(current_macd) < 0.15 and current_macd < prev_macd:
+            return "MACD接近零轴且动能走弱，留意回撤风险"
             
     except Exception as e:
         logger.error(f"MACD分析失败: {str(e)}")
@@ -105,10 +111,19 @@ def _analyze_kdj(df: pd.DataFrame) -> str:
         current_k = df['K'].iloc[-1]
         current_d = df['D'].iloc[-1]
         
-        if current_k < 20 and current_d < 20:
+        # Looser thresholds for more actionable hints.
+        if current_k < 30 and current_d < 30:
             return "KDJ超卖，可能反弹"
-        elif current_k > 80 and current_d > 80:
+        elif current_k > 70 and current_d > 70:
             return "KDJ超买，注意回调"
+        # Mid-zone turns.
+        if len(df) >= 2 and 'K' in df.columns and 'D' in df.columns:
+            prev_k = df['K'].iloc[-2]
+            prev_d = df['D'].iloc[-2]
+            if current_k > current_d and prev_k <= prev_d and current_k < 60:
+                return "KDJ低位金叉，短线回暖迹象"
+            if current_k < current_d and prev_k >= prev_d and current_k > 40:
+                return "KDJ高位死叉，短线降温迹象"
             
     except Exception as e:
         logger.error(f"KDJ分析失败: {str(e)}")
@@ -124,10 +139,14 @@ def _analyze_rsi(df: pd.DataFrame) -> str:
             
         current_rsi = df['RSI'].iloc[-1]
         
-        if current_rsi < 20:
+        # Looser thresholds (classic 30/70) to reduce empty outputs.
+        if current_rsi < 30:
             return "RSI超卖，可能反弹"
-        elif current_rsi > 80:
+        elif current_rsi > 70:
             return "RSI超买，注意回调"
+        # Soft mid-zone guidance.
+        if 45 <= current_rsi <= 55:
+            return "RSI位于中性区间，短线偏震荡"
             
     except Exception as e:
         logger.error(f"RSI分析失败: {str(e)}")
@@ -150,6 +169,11 @@ def _analyze_boll(df: pd.DataFrame) -> str:
             return "股价突破布林上轨，超买状态"
         elif current_price < boll_low:
             return "股价跌破布林下轨，超卖状态"
+        # Near-band hints (within ~1%).
+        if boll_up and current_price >= boll_up * 0.99:
+            return "股价接近布林上轨，若放量易走强，注意冲高回落"
+        if boll_low and current_price <= boll_low * 1.01:
+            return "股价接近布林下轨，若止跌缩量可观察反弹"
             
     except Exception as e:
         logger.error(f"布林带分析失败: {str(e)}")
@@ -192,11 +216,41 @@ def _analyze_volume(df: pd.DataFrame) -> str:
             return "VR大于160，市场活跃度高"
         elif current_vr < 40:
             return "VR小于40，市场活跃度低"
+        if 80 <= current_vr <= 120:
+            return "量能处于常态区间，等待方向选择"
             
     except Exception as e:
         logger.error(f"成交量分析失败: {str(e)}")
     
     return ""
+
+
+def _analyze_trend_takeaway(df: pd.DataFrame) -> str:
+    """When no strong signal, provide a gentle trend/range takeaway."""
+    try:
+        if 'close' not in df.columns:
+            return "当前信号不强，建议结合趋势与成交量观察。"
+        close = float(df['close'].iloc[-1])
+        ma20 = float(df['MA20'].iloc[-1]) if 'MA20' in df.columns and pd.notna(df['MA20'].iloc[-1]) else None
+        ma60 = float(df['MA60'].iloc[-1]) if 'MA60' in df.columns and pd.notna(df['MA60'].iloc[-1]) else None
+        rsi = float(df['RSI'].iloc[-1]) if 'RSI' in df.columns and pd.notna(df['RSI'].iloc[-1]) else None
+
+        if ma20 is not None and ma60 is not None:
+            if close >= ma20 >= ma60:
+                return "趋势偏强：价格站上 MA20/MA60，上行结构保持，回踩关注 MA20 支撑。"
+            if close <= ma20 <= ma60:
+                return "趋势偏弱：价格位于 MA20/MA60 下方，反弹关注 MA20 压力与量能。"
+            return "区间震荡：均线纠缠，建议等待放量突破/跌破后再跟随。"
+
+        if rsi is not None:
+            if rsi >= 60:
+                return "动能偏强：RSI 偏高，注意冲高后的回撤节奏。"
+            if rsi <= 40:
+                return "动能偏弱：RSI 偏低，关注是否出现止跌与量能回升。"
+            return "动能中性：短线更可能震荡，关注关键支撑/压力位。"
+    except Exception:
+        pass
+    return "当前信号不强，建议结合趋势与成交量观察。"
 
 
 def _analyze_roc(df: pd.DataFrame) -> str:

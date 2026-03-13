@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 
 import openai
 import pandas as pd
@@ -818,7 +818,11 @@ class LLMAnalyzer:
             print(f"生成趋势强度分析失败: {str(e)}")
             return None
 
-    def generate_single_stock_analysis(self, detailed_data: Dict[str, Any]) -> Optional[str]:
+    def generate_single_stock_analysis(
+        self,
+        detailed_data: Dict[str, Any],
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> Optional[str]:
         """
         生成单股深度分析
         
@@ -829,7 +833,12 @@ class LLMAnalyzer:
             单股分析文本，失败时返回None
         """
         try:
+            def report(progress: int, message: str) -> None:
+                if progress_callback:
+                    progress_callback(progress, message)
+
             print(f"开始生成 {detailed_data['name']} 的单股分析...")
+            report(56, "正在整理提示词与上下文，准备发送模型请求")
             
             # 构建单股分析数据
             stock_info = f"单股深度分析 - {detailed_data['name']} ({detailed_data['code']})：\n\n"
@@ -1053,18 +1062,19 @@ class LLMAnalyzer:
             ]
             
             print("发送单股分析请求...")
+            report(72, "模型请求已发送，正在等待 AI 返回完整报告")
             # 根据分析深度设置不同的max_tokens
             if detailed_data['analysis_depth'] == "快速分析":
-                max_tokens = 2000
+                max_tokens = 1200
             elif detailed_data['analysis_depth'] == "深度分析":
-                max_tokens = 4000
+                max_tokens = 2200
             else:  # 全面评估
-                max_tokens = 6000
+                max_tokens = 3200
             
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.7,  # 稍微提高温度以获得更丰富的表达
+                temperature=0.5,
                 max_tokens=max_tokens,  # 设置足够的token数量
                 stream=False
             )
@@ -1072,9 +1082,11 @@ class LLMAnalyzer:
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
                 print(f"{detailed_data['name']} 单股分析生成成功")
+                report(92, "AI 已返回内容，正在整理结果")
                 return analysis_text
             else:
                 print("单股分析响应为空")
+                report(92, "AI 请求已完成，但响应内容为空")
                 return None
                 
         except openai.APIConnectionError as ce:

@@ -7,31 +7,49 @@
 import pandas as pd
 from typing import Dict, List, Optional
 from ashare.logging import get_logger
+from ashare.stock_pool import get_exchange_label, is_valid_stock_code, normalize_stock_code
 
-# 尝试导入数据源
+# 尝试导入数据源（pip 的 ashare 包可能与项目根目录 Ashare.py 冲突，用文件路径显式加载）
+as_api = None
 try:
     import sys
+    import importlib.util
     from pathlib import Path
-    # 添加项目根目录到路径
-    project_root = Path(__file__).parent.parent
+
+    project_root = Path(__file__).parent.parent.resolve()
     sys.path.insert(0, str(project_root))
-    
-    # 尝试导入旧的Ashare模块
-    try:
-        import Ashare as as_api
-    except ImportError:
-        # 如果找不到，尝试从备份加载
-        backup_ashare = project_root / '_backup' / '_old_Ashare.py'
-        if backup_ashare.exists():
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("Ashare", backup_ashare)
-            as_api = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(as_api)
-        else:
+
+    def _load_ashare_module():
+        """Load project Ashare.py by path to avoid name clash with installed 'ashare' package."""
+        for name, path in [
+            ("ashare_data_source", project_root / "Ashare.py"),
+            ("ashare_backup", project_root / "_backup" / "_old_Ashare.py"),
+        ]:
+            if not path.exists():
+                continue
+            try:
+                spec = importlib.util.spec_from_file_location(name, path)
+                if spec and spec.loader:
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    if hasattr(mod, "get_price"):
+                        return mod
+            except Exception as ex:
+                print(f"警告: 加载 {path} 失败: {ex}")
+        return None
+
+    as_api = _load_ashare_module()
+    if as_api is None:
+        try:
+            import Ashare as as_api  # noqa: fallback if path load failed
+        except ImportError:
             as_api = None
 except Exception as e:
     as_api = None
     print(f"警告: 无法加载Ashare数据源模块: {e}")
+
+if as_api is None:
+    print("警告: as_api 未就绪，将使用 akshare 作为日线数据源备选")
 
 logger = get_logger(__name__)
 
@@ -64,6 +82,7 @@ class DataFetcher:
             股票数据DataFrame，失败时返回None
         """
         count = count or self.default_count
+        code = normalize_stock_code(code)
         cache_key = f"{code}_{count}_{frequency}"
         
         # 检查缓存
@@ -73,7 +92,15 @@ class DataFetcher:
         
         try:
             logger.info(f"正在获取股票 {code} 的数据...")
-            df = as_api.get_price(code, count=count, frequency=frequency)
+            df = None
+            if as_api is not None and hasattr(as_api, "get_price"):
+                try:
+                    df = as_api.get_price(code, count=count, frequency=frequency)
+                except Exception as ex:
+                    logger.warning("Ashare.get_price failed for %s: %s", code, ex)
+                    df = None
+            if (df is None or (isinstance(df, pd.DataFrame) and df.empty)) and frequency == "1d":
+                df = self._fetch_stock_data_akshare(code, count)
             
             # 检查数据是否有效
             if df is None or df.empty:
@@ -127,16 +154,16 @@ class DataFetcher:
         Returns:
             股票基本信息字典
         """
+        normalized = normalize_stock_code(code)
         try:
-            # 这里可以扩展获取更多股票信息
             return {
-                'code': code,
-                'exchange': self._get_exchange_from_code(code),
+                'code': normalized,
+                'exchange': get_exchange_label(normalized),
                 'status': 'active'  # 可以扩展获取实际状态
             }
         except Exception as e:
-            logger.error(f"获取股票 {code} 信息失败: {str(e)}")
-            return {'code': code, 'exchange': 'unknown', 'status': 'unknown'}
+            logger.error(f"获取股票 {normalized} 信息失败: {str(e)}")
+            return {'code': normalized, 'exchange': 'unknown', 'status': 'unknown'}
     
     def validate_stock_code(self, code: str) -> bool:
         """
@@ -151,21 +178,11 @@ class DataFetcher:
         if not code:
             return False
         
-        code = code.upper()
-        
-        # 检查上交所格式 (SH开头)
-        if code.startswith('SH') and len(code) == 8:
+        normalized = normalize_stock_code(code)
+        if is_valid_stock_code(normalized):
             return True
-        
-        # 检查深交所格式 (SZ开头)
-        if code.startswith('SZ') and len(code) == 8:
-            return True
-        
-        # 检查港股格式 (以.HK结尾)
-        if code.endswith('.HK') and len(code) >= 6:
-            return True
-        
-        logger.warning(f"股票代码格式可能不正确: {code}")
+
+        logger.warning(f"股票代码格式可能不正确: {normalized}")
         return False
     
     def clear_cache(self):
@@ -180,18 +197,56 @@ class DataFetcher:
             'cache_keys': list(self.data_cache.keys())
         }
     
-    def _get_exchange_from_code(self, code: str) -> str:
-        """从股票代码推断交易所"""
-        code = code.upper()
-        if code.startswith('SH'):
-            return '上交所'
-        elif code.startswith('SZ'):
-            return '深交所'
-        elif code.endswith('.HK'):
-            return '港交所'
-        else:
-            return '未知'
-    
+    def _fetch_stock_data_akshare(self, code: str, count: int) -> Optional[pd.DataFrame]:
+        """
+        akshare 日线备选：当 Ashare.get_price 不可用时使用。
+        symbol 为 6 位数字，不含 sh/sz 前缀。
+        """
+        try:
+            import akshare as ak
+        except ImportError:
+            return None
+        code = normalize_stock_code(code).lower()
+        if not (code.startswith("sh") or code.startswith("sz")) or len(code) < 8:
+            return None
+        symbol = code[2:8]  # 600036
+        try:
+            # 多取一些再 tail，避免节假日导致条数不足
+            end = pd.Timestamp.now().strftime("%Y%m%d")
+            start = (pd.Timestamp.now() - pd.Timedelta(days=count * 3)).strftime("%Y%m%d")
+            df = ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start, end_date=end, adjust="qfq")
+        except Exception as e:
+            logger.warning("akshare stock_zh_a_hist failed %s: %s", code, e)
+            return None
+        if df is None or df.empty:
+            return None
+        # akshare 列名：日期 开盘 收盘 最高 最低 成交量 ...
+        col_map = {
+            "日期": "time",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+        }
+        rename = {k: v for k, v in col_map.items() if k in df.columns}
+        if not rename:
+            return None
+        df = df.rename(columns=rename)
+        for c in ["open", "close", "high", "low", "volume"]:
+            if c not in df.columns:
+                return None
+        time_col = "time" if "time" in df.columns else df.columns[0]
+        df[time_col] = pd.to_datetime(df[time_col])
+        df = df.set_index(time_col)
+        df.index.name = ""
+        df = df[["open", "close", "high", "low", "volume"]].astype(float)
+        df = df.tail(count)
+        if df.empty:
+            return None
+        logger.info(f"akshare 备选成功 {code} 共 {len(df)} 条")
+        return df
+
     def _log_stock_code_help(self, code: str):
         """记录股票代码格式帮助信息"""
         logger.info("请检查股票代码格式是否正确。常见格式:")

@@ -5,9 +5,7 @@
 """
 
 import pandas as pd
-from typing import Dict, List, Optional, Any
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
+from typing import Callable, Dict, List, Optional, Any
 import numpy as np
 import os
 import pytz
@@ -65,6 +63,7 @@ class StockAnalyzer:
         self.data_fetcher = DataFetcher(default_count=self.count)
         self.indicators_calculator = TechnicalIndicators()
         self.report_generator = ReportGenerator()
+        self._matplotlib_fonts_ready = False
         
         # 初始化交互式图表生成器
         try:
@@ -75,9 +74,6 @@ class StockAnalyzer:
             logger.warning(f"无法启用交互式图表功能: {str(e)}")
             self.interactive_charts = None
         
-        # 配置matplotlib字体
-        self._setup_matplotlib_fonts()
-
         # 从配置获取API密钥和基础URL
         self.llm_api_key = llm_api_key or self.config.llm_api_key
         self.llm_base_url = llm_base_url or self.config.llm_base_url
@@ -93,7 +89,12 @@ class StockAnalyzer:
 
     def _setup_matplotlib_fonts(self):
         """设置matplotlib中文字体"""
+        if self._matplotlib_fonts_ready:
+            return
         try:
+            import matplotlib.font_manager as fm
+            import matplotlib.pyplot as plt
+
             plt.rcParams['font.sans-serif'] = ['SimHei']
             plt.rcParams['axes.unicode_minus'] = False
 
@@ -112,6 +113,7 @@ class StockAnalyzer:
             else:
                 logger.info(f"字体文件不存在: {font_path}，使用默认字体")
                 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
+            self._matplotlib_fonts_ready = True
                 
         except Exception as e:
             logger.error(f"设置matplotlib字体失败: {str(e)}")
@@ -491,7 +493,13 @@ class StockAnalyzer:
             logger.error(f"生成趋势强度分析失败: {str(e)}")
             return None
 
-    def generate_single_stock_analysis(self, stock_name: str, stock_data: Dict, analysis_depth: str) -> Optional[str]:
+    def generate_single_stock_analysis(
+        self,
+        stock_name: str,
+        stock_data: Dict,
+        analysis_depth: str,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> Optional[str]:
         """
         生成单股深度分析
         
@@ -508,7 +516,12 @@ class StockAnalyzer:
             return None
             
         try:
+            def report(progress: int, message: str) -> None:
+                if progress_callback:
+                    progress_callback(progress, message)
+
             logger.info(f"开始生成 {stock_name} 的单股分析...")
+            report(10, f"已确认标的 {stock_name}，准备整理技术与统计数据")
             
             # 获取股票的完整数据
             stock_code = None
@@ -522,6 +535,7 @@ class StockAnalyzer:
                 return None
             
             df = self.processed_data_dict[stock_code]
+            report(28, "已读取本地行情与技术指标，开始构建分析上下文")
             
             # 计算更多统计数据
             current_price = df.iloc[-1]['close']
@@ -599,15 +613,18 @@ class StockAnalyzer:
                     'avg_daily_change': df.tail(30)['close'].pct_change().mean() * 100
                 }
             }
+            report(46, "分析上下文整理完成，准备调用 AI 生成报告")
             
             # 调用LLM生成单股分析
-            analysis_text = self.llm.generate_single_stock_analysis(detailed_data)
+            analysis_text = self.llm.generate_single_stock_analysis(detailed_data, progress_callback=progress_callback)
             
             if analysis_text:
                 logger.info(f"{stock_name} 单股分析生成成功")
+                report(100, "AI 报告已返回，结果已写入当前页面")
                 return analysis_text
             else:
                 logger.warning(f"{stock_name} 单股分析生成失败")
+                report(100, "AI 未返回有效报告")
                 return None
                 
         except Exception as e:
@@ -664,6 +681,7 @@ class StockAnalyzer:
         logger.info("开始生成HTML报告...")
         
         try:
+            self._setup_matplotlib_fonts()
             # 分析所有股票
             stock_analyses = []
             for code in self.processed_data_dict.keys():

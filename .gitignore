@@ -60,6 +60,22 @@ Thumbs.db
 logs/
 *.log
 
+# Local runtime data
+data/*.db
+data/agent_memory/
+data/user_settings.json
+
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+.codex-skill-build/
+
+# Next.js
+.next/
+.next-dev/
+.next.bak-*/
+node_modules/
+tsconfig.tsbuildinfo
+
+# Test caches
+.pytest_cache/

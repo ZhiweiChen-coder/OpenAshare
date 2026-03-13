@@ -1,249 +1,245 @@
-# 📈 A股AI量化分析系统
+# OpenAshare
 
-> **智能选股 · 技术分析 · 交易信号 · AI洞察** | 专为中国股民打造
+A股 AI 分析工作台。当前仓库保留一套主界面：
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.36+-red.svg)](https://streamlit.io/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/ZhiweiChen-coder/Ashare-AI-Strategy-Analyst?style=social)](https://github.com/ZhiweiChen-coder/Ashare-AI-Strategy-Analyst)
+- `FastAPI + Next.js`：面向“单股分析 + 消息 + 热点 + 持仓 + Agent”主链路。
 
-## ✨ 核心功能
+## Features
 
-- 🎯 **智能评分** - 1-5分制精准评估股票走势
-- 🤖 **AI分析** - 集成DeepSeek/OpenAI智能洞察
-- 📊 **25+指标** - MACD、RSI、KDJ、布林带等全面分析
-- 🔍 **快速搜索** - 股票代码、名称、行业一键查询
-- 📈 **实时行情** - 获取最新股票数据和技术指标
-- 📝 **生成报告** - 导出专业的HTML分析报告
-- 🎨 **现代界面** - 美观易用的Web操作界面
+- 单股分析：整合技术指标、信号总结和 AI 解读
+- 消息与热点：追踪个股新闻、全球消息和主题热点
+- 持仓管理：支持录入、修改、删除和组合分析
+- Agent 对话：将分析、消息、热点和持仓能力编排到统一问答入口
+- 双部署方式：支持本机运行和 Docker 部署
+- 可扩展能力层：支持开发者按自己的工作流接入本地 skill、工具或外部数据源
 
-## 🚀 3分钟快速开始
+## 当前能力
+
+- 保留原有技术分析与 AI 分析引擎
+- 新增统一 API：
+  - `GET /api/stocks/search`
+  - `GET /api/stocks/{code}/analysis`
+  - `GET /api/stocks/{code}/news`
+  - `GET /api/hotspots`
+  - `GET /api/portfolio`
+  - `POST /api/portfolio/positions`
+  - `PUT /api/portfolio/positions/{id}`
+  - `DELETE /api/portfolio/positions/{id}`
+  - `GET /api/portfolio/analysis`
+  - `POST /api/agent/query`
+- 新增 Next.js 页面：
+  - 首页
+  - 单股分析页
+  - 持仓页
+  - 消息页
+  - 热点页
+  - Agent 对话页
+
+## 架构
+
+```text
+Next.js 前端
+    ↓
+FastAPI API 层
+    ↓
+ashare 分析引擎 / monitor 新闻热点模块 / portfolio SQLite
+    ↓
+AkShare + LLM
+```
+
+## Agent 设计说明
+
+项目中的 Agent 编排和记忆机制借鉴了 OpenClaw 的部分思考模式，重点体现在：
+
+- 本地优先的记忆存储，而不是把完整历史长期塞进模型上下文
+- 将短期对话、长期偏好和阶段性总结分层管理
+- 用 heartbeat / summary 的方式定期压缩上下文，降低推理成本
+- 在回答时优先做任务路由和上下文整理，再决定调用分析、资讯或组合能力
+
+这里是思路借鉴，不要求运行 OpenClaw 本体；当前仓库仍然是独立的 `FastAPI + Next.js` 应用。
+
+## Extensibility
+
+这个项目默认提供独立的应用层和 Agent 编排层，开发者可以在不修改整体产品形态的前提下自行扩展能力，例如：
+
+- 接入本地安装的 skill
+- 增加自定义数据源或资讯源
+- 替换或补充 LLM 提供商
+- 为 Agent 增加新的工具路由和任务类型
+
+建议将这类扩展保持在本地配置、环境变量或独立服务层中，而不是把个人私有 skill 和密钥直接写进公开仓库。
+
+## 快速启动
+
+项目支持两种部署方式：
+
+- 本机运行：适合开发和调试
+- Docker 部署：适合快速拉起完整环境
+
+### 方式一：本机运行
+
+#### 1. Python 依赖
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/ZhiweiChen-coder/Ashare-AI-Strategy-Analyst.git
-cd Ashare-AI-Strategy-Analyst
-
-# 2. 安装依赖
-pip install -r config/requirements.txt
-
-# 3. 配置API密钥（复制示例，填入你的密钥）
-cp config/.env.example .env
-nano .env
-
-# 4. 启动应用
-streamlit run streamlit_app.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements_api.txt
 ```
 
-打开浏览器：**http://localhost:8501** ✨
+如果你还需要旧分析链路依赖或本地图表扩展，再额外安装：
 
-## 📁 项目结构
-
-```
-Ashare-AI-Strategy-Analyst/
-├── 📱 app/                 # Streamlit Web应用
-│   └── pages/             # 首页、配置、分析、图表、AI洞察
-├── 🔧 ashare/             # 核心分析模块
-│   ├── analyzer.py        # 分析引擎
-│   ├── indicators.py      # 25+技术指标
-│   ├── llm.py            # AI分析（DeepSeek/OpenAI）
-│   ├── signals.py        # 评分系统
-│   └── ...
-├── 🎨 assets/            # CSS、字体、HTML模板
-├── ⚙️ config/            # 配置文件和依赖
-├── 🚀 scripts/           # 启动脚本
-├── streamlit_app.py      # 应用入口
-└── .env                  # 环境变量（需自己创建）
+```bash
+pip install -r requirements.txt
 ```
 
-## ✨ 核心功能
+#### 2. Node 依赖
 
-### 📊 技术分析
-- **25+种技术指标**：MACD, RSI, KDJ, 布林带, DMI, ROC等
-- **多时间框架分析**：日线、周线、月线
-- **趋势判断**：自动识别金叉、死叉、超买超卖
-- **成交量分析**：量价关系研判
+```bash
+npm install
+```
 
-### 🎯 智能评分系统（独创）
-| 评分 | 信号 | 说明 |
-|------|------|------|
-| 5分 | 🟢 强烈看涨 | 全是买入信号，强烈推荐 |
-| 4分 | 🟢 看涨 | 买入信号占优 |
-| 3分 | 🟡 偏多 | 略偏多头 |
-| 2分 | 🟡 中性 | 观望或持有 |
-| 1分 | 🔴 看跌 | 卖出信号占优 |
+#### 3. 环境变量
 
-### 🤖 AI智能分析
-- **DeepSeek集成**：性价比高的AI分析
-- **OpenAI支持**：GPT-4级别分析
-- **结构化输出**：JSON格式，包含信号、置信度、目标价
-- **重试机制**：自动重试保证稳定性
+项目根目录创建本地 `.env`，至少建议配置：
 
-### 🔍 智能股票搜索
-- **多种搜索方式**：代码、名称、行业关键词
-- **实时建议**：输入时自动提示
-- **评分排序**：按匹配度排序
-- **预设股票池**：热门指数、个股一键加载
-
-### 📈 股票池管理
-- **灵活添加**：搜索添加、手动输入、预设加载
-- **批量管理**：支持批量添加和删除
-- **即时分析**：创建分析器后立即开始
-
-### 📝 报告生成
-- **HTML格式**：美观的可视化报告
-- **完整数据**：包含所有技术指标和信号
-- **图表展示**：交互式K线图和指标图
-- **一键导出**：便于分享和保存
-
-## 🛠️ 技术栈
-
-### 前端框架
-- **Streamlit 1.36+**：现代化Web界面
-- **自定义CSS**：渐变色、动画效果
-
-### 数据处理
-- **Pandas**：数据处理和分析
-- **NumPy**：数值计算
-- **Numba**：性能加速（可选）
-
-### 数据可视化
-- **Plotly**：交互式图表
-- **Matplotlib**：静态图表
-
-### AI/ML
-- **OpenAI API**：支持GPT-4、GPT-4o-mini
-- **DeepSeek API**：高性价比选择
-- **Tenacity**：重试机制
-
-### 数据源
-- **AKShare**：A股数据获取
-- **自定义API**：多数据源支持
-
-### 其他
-- **Python-dotenv**：环境变量管理
-- **Joblib**：数据缓存
-- **Jinja2**：模板引擎
-
-## 📖 使用指南
-
-### 1. 配置股票池
-- 进入"⚙️ 配置"页面
-- 使用搜索添加股票，或选择预设股票池
-- 点击"🔧 创建股票分析器"
-
-### 2. 运行分析
-- 切换到"📊 分析"页面
-- 点击"🔄 开始分析"
-- 查看分析结果和信号评分
-
-### 3. 查看图表
-- 切换到"📈 图表"页面
-- 查看K线图和技术指标图表
-- 支持交互式缩放和平移
-
-### 4. AI洞察
-- 切换到"🤖 AI洞察"页面
-- 获取AI生成的投资建议
-- 查看置信度和目标价格
-
-## 🎨 界面预览
-
-### 系统状态显示
-- ✅ **分析器已就绪**：显示股票池数量
-- ✅ **LLM API 已配置**：AI分析功能可用
-- ⚠️ **待配置**：提示需要配置
-
-### 分析结果概览
-- **分析股票**：总股票数量
-- **成功分析**：成功获取数据的股票
-- **看涨信号**：百分比和比例（如 40% 2/5）
-- **分析时间**：最后分析时间
-
-## 🔧 配置说明
-
-### 环境变量（.env文件）
 ```env
-# LLM API配置
 LLM_API_KEY=your_api_key
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
-
-# 日志配置
-LOG_LEVEL=INFO
-DEBUG=false
+MONITOR_DB_PATH=./data/monitor.db
 ```
 
-### 支持的LLM服务
-1. **DeepSeek**（推荐）
-   - 地址：https://api.deepseek.com
-   - 模型：deepseek-chat
-   - 优势：性价比高
+也可以从示例开始：
 
-2. **OpenAI**
-   - 地址：https://api.openai.com/v1
-   - 模型：gpt-4o-mini, gpt-4
-   - 优势：准确度高
+```bash
+cp config/.env.example .env
+```
 
-## 🚀 项目亮点
+#### 4. 启动后端 API
 
-1. **v2.0重构**：目录结构从12+个精简到6个核心目录
-2. **模块化设计**：清晰的职责划分，易于维护
-3. **智能评分**：独创的1-5分评分系统
-4. **性能优化**：缓存机制、Numba加速
-5. **容错设计**：完善的错误处理和重试机制
-6. **现代化UI**：美观的渐变色设计
+```bash
+./scripts/run_api.sh
+```
 
-## 📝 更新日志
+默认地址：`http://127.0.0.1:8000`
 
-### v2.0.0 (2025-10-25)
-- ✨ 完成项目结构重构
-- ✨ 新增智能评分系统（1-5分）
-- ✨ 添加看涨信号统计
-- 🔧 修复数据获取问题
-- 🔧 优化import路径
-- 📚 更新完整文档
+#### 5. 启动前端
 
-### v1.x
-- 初始版本功能
+```bash
+npm run dev
+```
 
-## ❓ 常见问题
+默认地址：`http://127.0.0.1:3000`
 
-**Q: 显示"数据获取失败"？**
-A: 检查网络连接，确保可以访问股票数据源。
+如果后端不在本机 `8000` 端口，启动前设置：
 
-**Q: "LLM API 未配置"？**
-A: 在项目根目录创建`.env`文件，添加API密钥。
+```bash
+export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
 
-**Q: 评分总是2分（中性）？**
-A: 说明买入和卖出信号数量相当，市场无明显方向。
+### 方式二：Docker 部署
 
-**Q: 如何添加自定义股票？**
-A: 在配置页面使用"手动添加股票"功能，格式：`代码 名称`
+#### 1. 准备环境变量
 
-## 📄 许可证
+```bash
+cp .env.docker.example .env
+```
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+然后在 `.env` 中填入你的真实配置，至少包括：
 
-## 🤝 贡献
+```env
+LLM_API_KEY=your_api_key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-chat
+MONITOR_DB_PATH=/app/data/monitor.db
+```
 
-欢迎提交Issue和Pull Request！
+#### 2. 启动容器
 
-### 贡献指南
-1. Fork本项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启Pull Request
+```bash
+docker compose up --build -d
+```
 
-## 👨‍💻 作者
+启动后访问：
 
-Zhiwei Chen 
+- 前端：`http://127.0.0.1:3000`
+- 后端：`http://127.0.0.1:8000`
 
-## 🌟 Star History
+停止容器：
 
-如果这个项目对您有帮助，请给它一个Star！⭐
+```bash
+docker compose down
+```
 
----
+查看日志：
 
-**注意**：本系统仅供学习交流使用，不构成任何投资建议。投资有风险，入市需谨慎！
+```bash
+docker compose logs -f backend
+docker compose logs -f frontend
+```
+
+说明：
+
+- `docker-compose.yml` 会同时启动前端和后端
+- `./data` 与 `./logs` 会挂载到容器内，保留本地运行数据
+- 前端通过容器内地址 `http://backend:8000` 转发到后端，无需额外改代码
+- Docker 部署建议优先使用 [`.env.docker.example`](/Users/peter/Desktop/项目/Ashare-AI-Strategy-Analyst/.env.docker.example) 生成本地 `.env`
+
+## 目录说明
+
+```text
+api/                  FastAPI 入口、schema 和服务层
+app/                  Next.js App Router 页面
+components/           前端交互组件
+lib/                  前端 API 客户端与类型
+ashare/               分析引擎、监控与数据模块
+scripts/run_api.sh    API 启动脚本
+scripts/run_monitor.sh 监控服务启动脚本
+docker/               Docker 镜像定义
+docker-compose.yml    Docker 编排文件
+```
+
+## API 返回模型
+
+核心类型：
+
+- `StockAnalysisResponse`
+- `NewsItem`
+- `HotspotItem`
+- `PortfolioPosition`
+- `PortfolioAnalysisResponse`
+- `AgentResponse`
+
+这些类型分别定义在 `api/schemas.py` 和 `lib/types.ts` 中。
+
+## 已完成验证
+
+- `python -m pytest tests/test_api_app.py -q`
+- `npm run build`
+
+## 说明
+
+- 新版前端首版以打通主链路为主，图表仍是轻量展示。
+- 持仓页已经支持录入、修改、删除和组合分析。
+- Agent 页当前是轻量对话编排层，负责在单股分析、消息、热点、持仓之间路由请求。
+- 旧版 `Streamlit` 和命令行主程序入口已经移除，统一使用 Next.js 前端 + FastAPI API。
+
+## 开源发布建议
+
+- 公开仓库建议只保留代码、测试、示例配置和静态样例数据。
+- 本地运行状态不要公开，包括密钥、用户设置、Agent 记忆、监控数据库、持仓数据库和日志。
+- 发布前不要直接执行 `git add .`，先运行 `git status --short`，再按文件精确选择要提交的内容。
+- 若保留 Agent 相关说明，尽量描述公开的架构思路，不要写入私有本地 skill、个人工作流或机器相关配置。
+
+## 风险提示
+
+本项目仅供学习和研究使用，不构成投资建议。投资有风险，决策需自行承担责任。
+
+## 发布到 GitHub 前的安全检查
+
+- 不要提交任何真实密钥或账号信息：确保 `.env`、`data/user_settings.json`、邮件配置、Webhook 配置都没有进入暂存区。
+- 不要提交任何本地状态文件：确保 `data/*.db`、`data/agent_memory/`、`logs/`、`.DS_Store` 没有被 `git add`。
+- 建议只提交示例配置：如 `config/.env.example`，并在其中使用占位符，例如 `your_api_key`。
+- 若提交 README 或 Agent 设计文档，只保留通用架构说明，不公开私有 skill 名、API key 或本机 agent wiring。
+- 发布前至少执行一次 `git status --short` 和 `git diff --cached --stat`，确认暂存区里没有本机数据。
+- 若曾错误提交过敏感信息，不要只删工作区文件；还需要清理 Git 历史，并立即在对应服务中轮换密钥。

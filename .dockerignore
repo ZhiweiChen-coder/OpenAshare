@@ -55,4 +55,19 @@ logs/
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Local agent / build state
+.codex-skill-build/
+
+# Frontend build outputs
+.next/
+.next-dev/
+.next.bak-*/
+node_modules/
+tsconfig.tsbuildinfo
+
+# Local runtime data
+data/*.db
+data/agent_memory/
+data/user_settings.json

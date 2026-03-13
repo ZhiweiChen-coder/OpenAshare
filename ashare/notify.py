@@ -187,6 +187,54 @@ class PushNotifier:
             print("❌ 所有推送方式都失败了")
             return False
 
+    def format_alert_event(self, event):
+        """格式化结构化监控告警。"""
+        payload = event.raw_payload if isinstance(event.raw_payload, dict) else {}
+        extra_lines = []
+
+        if event.event_type == "news":
+            keywords = payload.get("keyword_hits") or []
+            if keywords:
+                extra_lines.append(f"命中关键词: {', '.join(keywords)}")
+            if payload.get("url"):
+                extra_lines.append(f"链接: {payload['url']}")
+        elif event.event_type == "fund_flow":
+            reasons = payload.get("triggered_reasons") or []
+            if reasons:
+                extra_lines.append(f"触发原因: {'；'.join(reasons)}")
+
+        body = [
+            f"股票: {event.stock_name} ({event.stock_code})",
+            f"类型: {event.event_type}",
+            f"来源: {event.source}",
+            f"时间: {event.occurred_at}",
+            f"优先级: {event.priority}/5",
+            "",
+            event.summary,
+        ]
+        body.extend(extra_lines)
+        return "\n".join(body).strip()
+
+    def send_alert_event(self, event, push_methods=None):
+        """发送实时监控告警。"""
+        push_methods = push_methods or ['serverchan']
+        title = f"🔔 {event.title}"
+        content = self.format_alert_event(event)
+
+        success_count = 0
+        for method in push_methods:
+            if method == 'serverchan':
+                if self.push_to_serverchan(title, content):
+                    success_count += 1
+            elif method == 'email':
+                if self.push_to_email(title, content):
+                    success_count += 1
+            elif method == 'work_wechat':
+                if self.push_to_work_wechat(content):
+                    success_count += 1
+
+        return success_count > 0
+
 
 def setup_serverchan_guide():
     """Server酱设置指南"""
