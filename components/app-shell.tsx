@@ -31,7 +31,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 const NAV_ITEMS = [
-  { href: "/", label: "首页" },
+  { href: "/dashboard", label: "工作台" },
   { href: "/stocks", label: "单股分析" },
   { href: "/charts", label: "K 线图" },
   { href: "/portfolio", label: "持仓页" },
