@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import copy
 import sqlite3
@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
@@ -43,6 +43,8 @@ from ashare.monitor import HkHotRankTracker, MonitorStateStore, NewsTracker, nor
 from ashare.search import stock_searcher
 from ashare.signals import SignalAnalyzer
 from ashare.stock_pool import infer_market, load_stock_pool, load_stock_topics, normalize_stock_code
+
+ProgressCallback = Callable[[str, int, str, Optional[Dict[str, Any]]], None]
 
 
 def _now_utc() -> datetime:
@@ -244,8 +246,15 @@ class StockAnalysisService:
         results = stock_searcher.search_stocks(query, max_results=max_results)
         return [StockSearchResult(**item) for item in results]
 
-    def build_analysis_bundle(self, stock_code: str, include_ai: bool = True) -> AnalyzerBundle:
+    def build_analysis_bundle(
+        self,
+        stock_code: str,
+        include_ai: bool = True,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> AnalyzerBundle:
         normalized = normalize_stock_code(stock_code)
+        if progress_callback:
+            progress_callback("resolve_stock", 15, f"已确认标的 {normalized}", {"stock_code": normalized})
         info = stock_searcher.get_stock_info(normalized)
         stock_name = info["name"] if info else normalized
         runtime_config = self._runtime_config()
@@ -255,15 +264,41 @@ class StockAnalysisService:
             config=runtime_config,
             enable_push=False,
         )
+        if progress_callback:
+            progress_callback("fetch_data", 25, "正在拉取行情数据", {"stock_code": normalized})
         if not analyzer.fetch_data():
             raise ValueError(f"Unable to fetch stock data for {normalized}")
+        if progress_callback:
+            progress_callback("fetch_data", 35, "行情数据已加载完成", {"stock_code": normalized})
         if not analyzer.calculate_indicators():
             raise ValueError(f"Unable to calculate indicators for {normalized}")
+        if progress_callback:
+            progress_callback("calculate_indicators", 50, "技术指标计算完成", {"stock_code": normalized})
 
         analysis = analyzer.analyze_single_stock(normalized)
         dataframe = analysis["processed_data"]
         signals = self.signal_analyzer.analyze_all_signals(dataframe)
+        if progress_callback:
+            progress_callback("build_analysis", 65, "技术分析结果已整理完成", {"stock_code": normalized})
         ai_text: Optional[str] = None
+        if include_ai and analyzer.llm and progress_callback:
+            progress_callback("generate_ai_report", 85, "正在生成 AI 分析报告", {"stock_code": normalized})
+
+            def report_ai(progress: int, message: str) -> None:
+                progress_callback(
+                    "generate_ai_report",
+                    max(85, min(99, progress)),
+                    message,
+                    {"stock_code": normalized},
+                )
+
+            ai_text = analyzer.generate_single_stock_analysis(
+                stock_name,
+                analysis,
+                "深度分析",
+                progress_callback=report_ai,
+            )
+            analyzer.llm = None
         if include_ai and analyzer.llm:
             ai_text = analyzer.generate_single_stock_analysis(stock_name, analysis, "深度分析")
         return AnalyzerBundle(
@@ -274,7 +309,12 @@ class StockAnalysisService:
             ai_text=ai_text,
         )
 
-    def get_stock_analysis(self, stock_code: str, include_ai: bool = True) -> StockAnalysisResponse:
+    def get_stock_analysis(
+        self,
+        stock_code: str,
+        include_ai: bool = True,
+        progress_callback: Optional[ProgressCallback] = None,
+    ) -> StockAnalysisResponse:
         normalized = normalize_stock_code(stock_code)
         runtime_config = self._runtime_config()
         model_cache_key = runtime_config.llm_model if include_ai and runtime_config.llm_api_key else "no-ai"
@@ -282,9 +322,11 @@ class StockAnalysisService:
         ttl = 300 if include_ai else 180
         cached = self._response_cache.get(cache_key)
         if cached is not None:
+            if progress_callback:
+                progress_callback("completed", 100, "命中缓存，分析结果已就绪", {"stock_code": normalized, "cached": True})
             return cached
 
-        bundle = self.build_analysis_bundle(normalized, include_ai=include_ai)
+        bundle = self.build_analysis_bundle(normalized, include_ai=include_ai, progress_callback=progress_callback)
         basic_data = bundle.analysis.get("基础数据", {})
         latest = bundle.dataframe.iloc[-1]
         # K 线图默认展示最近约 5 年日 K（~250 交易日 * 5），方便观察中长期趋势
@@ -360,6 +402,8 @@ class StockAnalysisService:
             },
         )
         self._response_cache.set(cache_key, response, ttl)
+        if progress_callback:
+            progress_callback("completed", 100, "分析结果已生成", {"stock_code": normalized})
         return response
 
 
@@ -425,12 +469,14 @@ class NewsService:
                 pass
 
         deduped: List[Dict[str, Any]] = []
-        seen_titles: set[str] = set()
+        seen_keys: set[str] = set()
         for item in sorted(records, key=self._global_news_sort_key, reverse=True):
-            title_key = item.get("title", "").strip().lower()
-            if title_key in seen_titles:
+            title_key = re.sub(r"\W+", "", item.get("title", "").strip().lower())
+            url_key = str(item.get("url") or "").strip().lower()
+            dedupe_key = url_key or title_key
+            if not dedupe_key or dedupe_key in seen_keys:
                 continue
-            seen_titles.add(title_key)
+            seen_keys.add(dedupe_key)
             deduped.append(item)
 
         result: List[GlobalNewsItem] = []
@@ -1231,16 +1277,30 @@ class AgentService:
         user_query: str,
         history: Optional[List[AgentHistoryTurn]] = None,
         memory_profile: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> AgentResponse:
+        def report(stage: str, progress_pct: int, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+            if progress_callback:
+                progress_callback(stage, progress_pct, message, meta)
+
+        def report_tool_start(progress_pct: int, message: str, tool: str) -> None:
+            report("tool_running", progress_pct, message, {"tool": tool})
+
+        def report_tool_done(progress_pct: int, message: str, tool: str, cached: bool = False) -> None:
+            report("tool_completed", progress_pct, message, {"tool": tool, "cached": cached})
+
         query = user_query.strip()
         history = history or []
         memory_profile = memory_profile or {}
         tools_used: List[str] = []
         cache_hits: List[str] = []
+        report("understand_query", 5, "已接收问题，开始理解查询意图")
+        report("load_memory", 15, "已加载会话记忆与历史上下文")
         context_target = self._extract_stock_from_history(history, memory_profile)
         target: Optional[Dict[str, str]] = None
         stock_resolution: Optional[StockResolution] = None
         if self._should_extract_stock(query, history, memory_profile):
+            report("tool_running", 35, "正在识别股票目标", {"tool": "search_stocks"})
             stock_resolution, search_cached = self._cached_call(
                 "stock_extract",
                 query,
@@ -1252,10 +1312,17 @@ class AgentService:
             tools_used.append("search_stocks")
             if search_cached:
                 cache_hits.append("search_stocks")
+            report(
+                "tool_completed",
+                45,
+                "股票目标识别完成",
+                {"tool": "search_stocks", "cached": search_cached},
+            )
             if stock_resolution and stock_resolution.confidence >= 0.85:
                 target = stock_resolution.target
         rewrite = self._rewrite_query(query, history, memory_profile, target or context_target)
         slots = self._build_context_slots(query, rewrite, history, memory_profile)
+        report("select_engine", 25, "已完成意图路由，准备执行对应分析")
 
         if rewrite.intent == "help":
             return AgentResponse(
@@ -1289,10 +1356,12 @@ class AgentService:
             )
 
         if rewrite.intent == "portfolio_analysis":
+            report_tool_start(35, "正在获取持仓组合分析", "portfolio_analysis")
             analysis, portfolio_cached = self._cached_call("portfolio", "default", self.portfolio_service.analyze_portfolio)
             tools_used.append("portfolio_analysis")
             if portfolio_cached:
                 cache_hits.append("portfolio_analysis")
+            report_tool_done(50, "持仓组合分析已完成", "portfolio_analysis", portfolio_cached)
             summary = (
                 "## 组合快照\n"
                 f"- 总盈亏 {analysis.total_pnl:.2f}，收益率 {analysis.total_pnl_pct:.2f}%\n"
@@ -1342,10 +1411,12 @@ class AgentService:
             )
 
         if rewrite.intent == "hotspot_lookup":
+            report_tool_start(35, "正在获取热点列表", "hotspots")
             hotspots, hotspots_cached = self._cached_call("hotspots", "limit=5", self.hotspot_service.list_hotspots, 5)
             tools_used.append("hotspots")
             if hotspots_cached:
                 cache_hits.append("hotspots")
+            report_tool_done(48, "热点列表已加载", "hotspots", hotspots_cached)
             global_news, news_cached = self._cached_call(
                 "context_news",
                 f"{rewrite.rewritten_query}|5",
@@ -1395,6 +1466,7 @@ class AgentService:
         if rewrite.intent == "news_lookup":
             target = rewrite.target_stock or context_target
             if not target:
+                report_tool_start(40, "正在获取全球重点新闻", "global_news")
                 global_news, news_cached = self._cached_call(
                     "context_news",
                     f"{rewrite.rewritten_query}|6",
@@ -1405,6 +1477,7 @@ class AgentService:
                 tools_used.append("global_news")
                 if news_cached:
                     cache_hits.append("global_news")
+                report_tool_done(58, "全球重点新闻已加载", "global_news", news_cached)
                 web_results: List[WebSearchResult] = []
                 if rewrite.wants_live_web:
                     web_results, web_cached = self._cached_call(
@@ -1437,6 +1510,7 @@ class AgentService:
                         "_meta": self._meta_payload(tools_used, cache_hits, rewrite, slots),
                     },
                 )
+            report_tool_start(40, f"正在获取 {target['name']} 的个股消息", "stock_news")
             results, stock_news_cached = self._cached_call(
                 "stock_news",
                 f"{target['code']}|{target['name']}|6",
@@ -1448,6 +1522,7 @@ class AgentService:
             tools_used.append("stock_news")
             if stock_news_cached:
                 cache_hits.append("stock_news")
+            report_tool_done(55, "个股消息已加载", "stock_news", stock_news_cached)
             context_news: List[GlobalNewsItem] = []
             if rewrite.include_context:
                 context_news, news_cached = self._cached_call(
@@ -1542,6 +1617,7 @@ class AgentService:
             return self._build_comparison_response(target, rewrite, slots, tools_used, cache_hits)
 
         if target:
+            report_tool_start(40, f"正在获取 {target['name']} 的技术分析", "stock_analysis")
             analysis, analysis_cached = self._cached_call(
                 "stock_analysis",
                 f"{target['code']}|0",
@@ -1552,6 +1628,7 @@ class AgentService:
             tools_used.append("stock_analysis")
             if analysis_cached:
                 cache_hits.append("stock_analysis")
+            report_tool_done(55, "技术分析已加载", "stock_analysis", analysis_cached)
             context_news: List[GlobalNewsItem] = []
             if rewrite.include_context:
                 context_news, news_cached = self._cached_call(
@@ -2158,3 +2235,4 @@ class AgentService:
                     "code": normalize_stock_code(stock_code),
                 }
         return None
+

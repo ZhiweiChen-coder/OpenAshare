@@ -3,9 +3,10 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 
-import { queryAgent } from "@/lib/api";
+import { streamAgentQuery } from "@/lib/api";
 import {
   AgentHistoryTurn,
+  AgentProgressEvent,
   AgentResponse,
   GlobalNewsItem,
   HotspotItem,
@@ -38,7 +39,7 @@ const DEFAULT_PROMPTS = ["分析 sh600036", "看看海光信息最近消息", "�
 const STORAGE_KEY = "ashare-agent-sessions-v1";
 
 type AgentChatProps = { compact?: boolean };
-type ProgressStage = "understand" | "fetch" | "compose";
+type StreamState = "idle" | "connecting" | "streaming" | "completed" | "error";
 
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -69,9 +70,11 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamState, setStreamState] = useState<StreamState>("idle");
   const [pendingQuery, setPendingQuery] = useState("");
-  const [progressStage, setProgressStage] = useState<ProgressStage>("understand");
+  const [currentStageLabel, setCurrentStageLabel] = useState("等待输入");
+  const [progressPct, setProgressPct] = useState(0);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
@@ -133,13 +136,9 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   );
   const messages = currentSession?.messages ?? [];
   const visibleMessages = messages.slice(-40); // cap rendering to last 40 messages to avoid infinite scroll
-  const busy = isPending || isStreaming;
-  const progressStages = useMemo(() => inferProgressStages(pendingQuery), [pendingQuery]);
-  const progressStep = useMemo(() => {
-    if (progressStage === "fetch") return Math.min(1, progressStages.length - 1);
-    if (progressStage === "compose") return Math.min(2, progressStages.length - 1);
-    return 0;
-  }, [progressStage, progressStages.length]);
+  const busy = isPending || streamState === "connecting" || streamState === "streaming";
+  const progressStages = useMemo(() => [currentStageLabel || "处理中"], [currentStageLabel]);
+  const progressStep = 0;
   const sortedSessions = useMemo(
     () =>
       [...sessions]
@@ -174,7 +173,9 @@ export function AgentChat({ compact = false }: AgentChatProps) {
 
   useEffect(() => {
     if (!busy) {
-      setProgressStage("understand");
+      setCurrentStageLabel("等待输入");
+      setProgressPct(0);
+      setActiveTool(null);
     }
   }, [busy]);
 
@@ -206,41 +207,15 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     }));
   }
 
-  async function streamAgentMessage(response: AgentResponse) {
-    const messageId = createId("msg");
-    const target = response.summary;
+  function appendAgentResponse(response: AgentResponse) {
     appendMessage({
-      id: messageId,
+      id: createId("msg"),
       role: "agent",
-      content: "",
-      actions: [],
-      citations: [],
-    });
-    setProgressStage("compose");
-    setIsStreaming(true);
-
-    const step = Math.max(4, Math.ceil(target.length / 36));
-    for (let index = 0; index < target.length; index += step) {
-      const nextContent = target.slice(0, index + step);
-      updateMessage(messageId, (message) => ({
-        ...message,
-        content: nextContent,
-        actions: nextContent.length >= target.length ? response.actions : [],
-        citations: [],
-      }));
-      await new Promise((resolve) => window.setTimeout(resolve, 18));
-    }
-
-    updateMessage(messageId, (message) => ({
-      ...message,
-      content: target,
+      content: response.summary,
       actions: response.actions,
-      citations: [],
+      citations: response.citations,
       response,
-    }));
-    setIsStreaming(false);
-    setPendingQuery("");
-    setProgressStage("understand");
+    });
   }
 
   function ask(question: string) {
@@ -256,17 +231,50 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     });
     setInput("");
     setPendingQuery(trimmed);
-    setProgressStage("understand");
+    setCurrentStageLabel("正在连接进度流");
+    setProgressPct(0);
+    setActiveTool(null);
     const history = buildAgentHistory(messages);
 
     startTransition(async () => {
       try {
-        setProgressStage("fetch");
-        const response = await queryAgent(trimmed, history, currentSession?.id ?? undefined);
-        await streamAgentMessage(response);
+        setStreamState("connecting");
+        await streamAgentQuery(trimmed, history, currentSession?.id ?? undefined, {
+          onStart: (event: AgentProgressEvent) => {
+            setStreamState("streaming");
+            setCurrentStageLabel(event.message || "已建立连接");
+            setProgressPct(event.progress_pct ?? 0);
+            setActiveTool(typeof event.meta?.tool === "string" ? event.meta.tool : null);
+          },
+          onProgress: (event: AgentProgressEvent) => {
+            setStreamState("streaming");
+            setCurrentStageLabel(event.message || "处理中");
+            setProgressPct(event.progress_pct ?? 0);
+            setActiveTool(typeof event.meta?.tool === "string" ? event.meta.tool : null);
+          },
+          onResult: (event: AgentProgressEvent) => {
+            if (event.payload) {
+              appendAgentResponse(event.payload);
+            }
+            setCurrentStageLabel(event.message || "回答已生成");
+            setProgressPct(event.progress_pct ?? 100);
+          },
+          onError: (event: AgentProgressEvent) => {
+            setStreamState("error");
+            appendMessage({
+              id: createId("msg"),
+              role: "agent",
+              content: event.message || "请求失败",
+            });
+          },
+          onDone: () => {
+            setStreamState("completed");
+            setPendingQuery("");
+          },
+        });
       } catch (error) {
         setPendingQuery("");
-        setProgressStage("understand");
+        setStreamState("error");
         appendMessage({
           id: createId("msg"),
           role: "agent",
@@ -1114,11 +1122,13 @@ function MemoryPanel({
 }) {
   const profile = meta.memory_profile;
   const heartbeat = meta.heartbeat;
-  const watchlist = profile?.watchlist ?? [];
+  const watchlist: Array<{ code: string; name?: string | null }> = Array.isArray(profile?.watchlist) ? profile.watchlist : [];
   const lastStock = profile?.last_stock_name || profile?.last_stock_code;
   const preferredMarket = formatMarketPreference(profile?.preferred_market);
   const activeGoal = typeof profile?.active_goal === "string" && profile.active_goal.trim() ? profile.active_goal.trim() : null;
-  const pinnedMemory = Array.isArray(profile?.pinned_memory) ? profile.pinned_memory.filter(Boolean).slice(0, 5) : [];
+  const pinnedMemory: string[] = Array.isArray(profile?.pinned_memory)
+    ? profile.pinned_memory.filter(Boolean).map((item: unknown) => String(item)).slice(0, 5)
+    : [];
   const heartbeatTime = heartbeat?.last_heartbeat_at ? formatHeartbeatTime(heartbeat.last_heartbeat_at) : null;
   const heartbeatSummary = heartbeat?.summary_text ? formatHeartbeatSummary(heartbeat.summary_text, profile) : null;
 

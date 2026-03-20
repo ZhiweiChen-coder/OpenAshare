@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from api.agent_pydantic import (
     run_agent_async,
 )
 from api.schemas import (
+    AgentProgressEvent,
     AgentHistoryTurn,
     AgentQuery,
     AgentResponse,
@@ -30,6 +32,7 @@ from api.schemas import (
     HotspotDetailResponse,
     HotspotItem,
     NewsItem,
+    StockAnalysisProgressEvent,
     PortfolioAnalysisResponse,
     PortfolioPosition,
     StockAnalysisResponse,
@@ -38,6 +41,7 @@ from api.schemas import (
     UserSettingsUpdate,
     WebSearchResult,
 )
+from api.sse import encode_sse, sse_response
 from api.settings_store import UserSettingsStore
 from api.services import AgentService, HotspotService, NewsService, PortfolioService, StockAnalysisService, WebSearchService
 from ashare.config import PROJECT_ROOT
@@ -72,6 +76,95 @@ def _cached_json_response(
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return JSONResponse(content=jsonable_encoder(payload), headers=headers)
+
+
+def _emit_stock_progress(
+    queue: "asyncio.Queue[str | None]",
+    loop: asyncio.AbstractEventLoop,
+    *,
+    kind: str,
+    stage: str,
+    progress_pct: int,
+    message: str,
+    stock_code: Optional[str] = None,
+    meta: Optional[dict[str, Any]] = None,
+    payload: Optional[StockAnalysisResponse] = None,
+) -> None:
+    event = StockAnalysisProgressEvent(
+        kind=kind,
+        flow="stock_analysis",
+        stage=stage,
+        progress_pct=progress_pct,
+        message=message,
+        stock_code=stock_code,
+        meta=meta or {},
+        payload=payload,
+    )
+    loop.call_soon_threadsafe(queue.put_nowait, encode_sse(kind, event.model_dump(mode="json", exclude_none=True)))
+
+
+def _normalize_agent_progress_message(
+    stage: str,
+    message: str,
+    meta: Optional[dict[str, Any]] = None,
+    *,
+    kind: str,
+    progress_pct: int,
+) -> str:
+    normalized_meta = meta or {}
+    tool = normalized_meta.get("tool")
+    engine = normalized_meta.get("engine")
+
+    tool_messages = {
+        ("tool_running", "portfolio_analysis"): "正在获取持仓组合分析",
+        ("tool_completed", "portfolio_analysis"): "持仓组合分析已完成",
+        ("tool_running", "hotspots"): "正在获取热点列表",
+        ("tool_completed", "hotspots"): "热点列表已加载",
+        ("tool_running", "global_news"): "正在获取全球重点新闻",
+        ("tool_completed", "global_news"): "全球重点新闻已加载",
+        ("tool_running", "stock_news"): "正在获取个股消息",
+        ("tool_completed", "stock_news"): "个股消息已加载",
+        ("tool_running", "stock_analysis"): "正在获取技术分析",
+        ("tool_completed", "stock_analysis"): "技术分析已加载",
+    }
+    if (stage, tool) in tool_messages:
+        return tool_messages[(stage, tool)]
+
+    if stage == "select_engine" and engine == "pydantic_ai":
+        return "已选择智能引擎，准备执行工具调用"
+    if stage == "select_engine" and engine == "deterministic" and progress_pct >= 30:
+        return "智能引擎失败，切换到规则分析"
+    if stage == "select_engine" and engine == "deterministic":
+        return "已选择规则分析引擎"
+    if stage == "persist_memory":
+        return "会话记忆已更新"
+    if kind == "result" and stage == "completed":
+        return "最终回答已生成"
+
+    return message
+
+
+def _emit_agent_progress(
+    queue: "asyncio.Queue[str | None]",
+    loop: asyncio.AbstractEventLoop,
+    *,
+    kind: str,
+    stage: str,
+    progress_pct: int,
+    message: str,
+    meta: Optional[dict[str, Any]] = None,
+    payload: Optional[AgentResponse] = None,
+) -> None:
+    event = AgentProgressEvent(
+        kind=kind,
+        flow="agent_query",
+        stage=stage,
+        progress_pct=progress_pct,
+        message=_normalize_agent_progress_message(stage, message, meta, kind=kind, progress_pct=progress_pct),
+        meta=meta or {},
+        payload=payload,
+    )
+    loop.call_soon_threadsafe(queue.put_nowait, encode_sse(kind, event.model_dump(mode="json", exclude_none=True)))
 
 
 def _warm_read_caches() -> None:
@@ -471,6 +564,82 @@ def get_stock_analysis(
         return _cached_json_response(request, payload, max_age=120, stale_while_revalidate=240)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/stocks/{stock_code}/analysis/stream")
+async def stream_stock_analysis(
+    stock_code: str,
+    include_ai: bool = Query(True, description="是否生成 AI 文本分析，默认开启"),
+):
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    normalized_code = stock_code.strip()
+
+    async def runner() -> None:
+        _emit_stock_progress(
+            queue,
+            loop,
+            kind="start",
+            stage="resolve_stock",
+            progress_pct=5,
+            message="已接收分析请求，准备解析股票标的",
+            stock_code=normalized_code,
+        )
+
+        def report(stage: str, progress_pct: int, message: str, meta: Optional[dict[str, Any]] = None) -> None:
+            _emit_stock_progress(
+                queue,
+                loop,
+                kind="progress",
+                stage=stage,
+                progress_pct=progress_pct,
+                message=message,
+                stock_code=normalized_code,
+                meta=meta,
+            )
+
+        try:
+            payload = await asyncio.to_thread(
+                stock_service.get_stock_analysis,
+                stock_code,
+                include_ai,
+                report,
+            )
+            _emit_stock_progress(
+                queue,
+                loop,
+                kind="result",
+                stage="completed",
+                progress_pct=100,
+                message="分析结果已生成",
+                stock_code=payload.stock_code,
+                payload=payload,
+            )
+        except Exception as exc:
+            logger.exception("stream_stock_analysis failed")
+            _emit_stock_progress(
+                queue,
+                loop,
+                kind="error",
+                stage="error",
+                progress_pct=100,
+                message=f"分析失败：{exc}",
+                stock_code=normalized_code,
+            )
+        finally:
+            _emit_stock_progress(
+                queue,
+                loop,
+                kind="done",
+                stage="completed",
+                progress_pct=100,
+                message="分析流已结束",
+                stock_code=normalized_code,
+            )
+            await queue.put(None)
+
+    asyncio.create_task(runner())
+    return sse_response(queue)
 
 
 @app.get("/api/stocks/{stock_code}/news", response_model=List[NewsItem])
@@ -883,74 +1052,88 @@ def _persist_agent_turns(session_id: Optional[str], payload: AgentQuery, respons
     )
 
 
+def _build_enriched_agent_query(query: str, history: List[AgentHistoryTurn], memory_profile: dict[str, Any]) -> str:
+    enriched_query = query
+    context_blocks: list[str] = []
+    if history:
+        history_text = "\n".join(f"{item.role}: {item.content}" for item in history[-8:])
+        context_blocks.append(f"对话上下文：\n{history_text}")
+    if memory_profile:
+        memory_lines = []
+        if memory_profile.get("preferred_market"):
+            memory_lines.append(f"偏好市场: {memory_profile['preferred_market']}")
+        if memory_profile.get("active_goal"):
+            memory_lines.append(f"当前目标: {memory_profile['active_goal']}")
+        if memory_profile.get("last_stock_name") or memory_profile.get("last_stock_code"):
+            memory_lines.append(
+                f"最近关注标的: {memory_profile.get('last_stock_name') or memory_profile.get('last_stock_code')}"
+            )
+        pinned_memory = memory_profile.get("pinned_memory") or []
+        if pinned_memory:
+            pinned_items = [str(item).strip() for item in pinned_memory[:5] if str(item).strip()]
+            if pinned_items:
+                memory_lines.append(f"固定记忆: {'; '.join(pinned_items)}")
+        watchlist = memory_profile.get("watchlist") or []
+        if watchlist:
+            focus_names = [
+                item.get("name") or item.get("code")
+                for item in watchlist[:5]
+                if isinstance(item, dict) and (item.get("name") or item.get("code"))
+            ]
+            if focus_names:
+                memory_lines.append(f"关注清单: {', '.join(focus_names)}")
+        if memory_lines:
+            context_blocks.append("记忆信息：\n" + "\n".join(memory_lines))
+    if context_blocks:
+        enriched_query = "\n\n".join([*context_blocks, f"当前问题：{query}"])
+    return enriched_query
+
+async def _run_agent_request(
+    payload: AgentQuery,
+    merged_history: List[AgentHistoryTurn],
+    memory_profile: dict[str, Any],
+    progress_callback=None,
+) -> AgentResponse:
+    agent, deps = _get_pydantic_agent()
+    if agent is not None and deps is not None:
+        if progress_callback:
+            progress_callback("select_engine", 25, "已选择智能引擎，准备执行工具调用", {"engine": "pydantic_ai"})
+        try:
+            return await run_agent_async(
+                agent,
+                deps,
+                _build_enriched_agent_query(payload.query, merged_history, memory_profile),
+                progress_callback=progress_callback,
+            )
+        except BaseException as exc:
+            if isinstance(exc, (SystemExit, KeyboardInterrupt)):
+                raise
+            logger.exception("PydanticAI agent run failed, falling back to deterministic agent")
+            if progress_callback:
+                progress_callback("select_engine", 30, "智能引擎失败，切换到规则分析", {"engine": "deterministic"})
+    elif progress_callback:
+        progress_callback("select_engine", 25, "已选择规则分析引擎", {"engine": "deterministic"})
+
+    return await asyncio.to_thread(
+        agent_service.query,
+        payload.query,
+        merged_history,
+        memory_profile,
+        progress_callback,
+    )
+
+
 @app.post("/api/agent/query")
 async def agent_query(payload: AgentQuery) -> Response:
     """Always return 200 + JSON. Never 500 - errors go in body."""
     try:
         merged_history = _merge_agent_history(payload)
         memory_profile = agent_memory_store.get_profile(payload.session_id or "")
-        agent, deps = _get_pydantic_agent()
-        if agent is not None and deps is not None:
-            try:
-                enriched_query = payload.query
-                context_blocks: list[str] = []
-                if merged_history:
-                    history_text = "\n".join(
-                        f"{item.role}: {item.content}"
-                        for item in merged_history[-8:]
-                    )
-                    context_blocks.append(f"对话上下文：\n{history_text}")
-                if memory_profile:
-                    memory_lines = []
-                    if memory_profile.get("preferred_market"):
-                        memory_lines.append(f"偏好市场: {memory_profile['preferred_market']}")
-                    if memory_profile.get("active_goal"):
-                        memory_lines.append(f"当前目标: {memory_profile['active_goal']}")
-                    if memory_profile.get("last_stock_name") or memory_profile.get("last_stock_code"):
-                        memory_lines.append(
-                            f"最近关注标的: {memory_profile.get('last_stock_name') or memory_profile.get('last_stock_code')}"
-                        )
-                    pinned_memory = memory_profile.get("pinned_memory") or []
-                    if pinned_memory:
-                        pinned_items = [str(item).strip() for item in pinned_memory[:5] if str(item).strip()]
-                        if pinned_items:
-                            memory_lines.append(f"固定记忆: {'; '.join(pinned_items)}")
-                    watchlist = memory_profile.get("watchlist") or []
-                    if watchlist:
-                        focus_names = [
-                            item.get("name") or item.get("code")
-                            for item in watchlist[:5]
-                            if isinstance(item, dict) and (item.get("name") or item.get("code"))
-                        ]
-                        if focus_names:
-                            memory_lines.append(f"关注清单: {', '.join(focus_names)}")
-                    if memory_lines:
-                        context_blocks.append("记忆信息：\n" + "\n".join(memory_lines))
-                if context_blocks:
-                    enriched_query = "\n\n".join([*context_blocks, f"当前问题：{payload.query}"])
-                resp = await run_agent_async(agent, deps, enriched_query)
-                _persist_agent_turns(payload.session_id, payload, resp)
-                heartbeat = _maybe_run_heartbeat(payload.session_id)
-                resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
-                return JSONResponse(content=_safe_agent_json(resp), status_code=200)
-            except BaseException as e:
-                if isinstance(e, (SystemExit, KeyboardInterrupt)):
-                    raise
-                logger.exception("PydanticAI agent run failed, falling back to deterministic agent")
-        try:
-            resp = agent_service.query(payload.query, merged_history, memory_profile)
-            _persist_agent_turns(payload.session_id, payload, resp)
-            heartbeat = _maybe_run_heartbeat(payload.session_id)
-            resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
-            return JSONResponse(content=_safe_agent_json(resp), status_code=200)
-        except BaseException as e:
-            if isinstance(e, (SystemExit, KeyboardInterrupt)):
-                raise
-            logger.exception("Fallback agent_service.query failed")
-            return JSONResponse(
-                content=_safe_agent_json(_error_response(f"Service error: {e!s}")),
-                status_code=200,
-            )
+        resp = await _run_agent_request(payload, merged_history, memory_profile)
+        _persist_agent_turns(payload.session_id, payload, resp)
+        heartbeat = _maybe_run_heartbeat(payload.session_id)
+        resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
+        return JSONResponse(content=_safe_agent_json(resp), status_code=200)
     except BaseException as e:
         if isinstance(e, (SystemExit, KeyboardInterrupt)):
             raise
@@ -962,3 +1145,85 @@ async def agent_query(payload: AgentQuery) -> Response:
             )
         except BaseException:
             return JSONResponse(content=_AGENT_ERROR_JSON, status_code=200)
+
+
+
+
+@app.post("/api/agent/query/stream")
+async def agent_query_stream(payload: AgentQuery) -> Response:
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    async def runner() -> None:
+        _emit_agent_progress(
+            queue,
+            loop,
+            kind="start",
+            stage="understand_query",
+            progress_pct=5,
+            message="已接收问题，开始理解查询意图",
+        )
+        try:
+            merged_history = _merge_agent_history(payload)
+            memory_profile = agent_memory_store.get_profile(payload.session_id or "")
+            _emit_agent_progress(
+                queue,
+                loop,
+                kind="progress",
+                stage="load_memory",
+                progress_pct=15,
+                message="已加载会话记忆与历史上下文",
+            )
+
+            def report(stage: str, progress_pct: int, message: str, meta: Optional[dict[str, Any]] = None) -> None:
+                _emit_agent_progress(
+                    queue,
+                    loop,
+                    kind="progress",
+                    stage=stage,
+                    progress_pct=progress_pct,
+                    message=message,
+                    meta=meta,
+                )
+
+            resp = await _run_agent_request(payload, merged_history, memory_profile, report)
+            _persist_agent_turns(payload.session_id, payload, resp)
+            report("persist_memory", 95, "会话记忆已更新")
+            heartbeat = _maybe_run_heartbeat(payload.session_id)
+            resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
+            _emit_agent_progress(
+                queue,
+                loop,
+                kind="result",
+                stage="completed",
+                progress_pct=100,
+                message="最终回答已生成",
+                payload=resp,
+            )
+        except BaseException as exc:
+            if isinstance(exc, (SystemExit, KeyboardInterrupt)):
+                raise
+            logger.exception("agent_query_stream failed")
+            _emit_agent_progress(
+                queue,
+                loop,
+                kind="error",
+                stage="error",
+                progress_pct=100,
+                message=f"请求失败：{exc}",
+            )
+        finally:
+            _emit_agent_progress(
+                queue,
+                loop,
+                kind="done",
+                stage="completed",
+                progress_pct=100,
+                message="响应流已结束",
+            )
+            await queue.put(None)
+
+    asyncio.create_task(runner())
+    return sse_response(queue)
+
+

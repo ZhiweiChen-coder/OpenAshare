@@ -6,6 +6,7 @@
 
 # API Keys and sensitive data
 config.py
+!ashare/config.py
 secrets.json
 *.key
 *.pem
@@ -34,6 +35,7 @@ wheels/
 MANIFEST
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/

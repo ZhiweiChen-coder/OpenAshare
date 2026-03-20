@@ -7,7 +7,6 @@ export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
   const [value, setValue] = useState(initialValue);
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [progressStep, setProgressStep] = useState(0);
   useEffect(() => {
     setValue(initialValue);
   }, [initialValue]);
@@ -26,19 +25,6 @@ export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
     });
   }
 
-  useEffect(() => {
-    if (!isPending) {
-      setProgressStep(0);
-      return;
-    }
-    setProgressStep(0);
-    const timer = window.setInterval(
-      () => setProgressStep((current) => (current + 1) % SEARCH_PROGRESS_STEPS.length),
-      1300,
-    );
-    return () => window.clearInterval(timer);
-  }, [isPending]);
-
   return (
     <div className="stack">
       <form className="form" onSubmit={onSubmit}>
@@ -56,7 +42,7 @@ export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
       <div aria-live="polite" className="muted search-progress">
         {isPending ? (
           <>
-            <strong>{SEARCH_PROGRESS_STEPS[progressStep]}</strong>
+            <strong>正在请求分析结果</strong>
             <span> · 正在为 {submittedQuery || "该标的"} 生成完整分析</span>
           </>
         ) : (

@@ -188,6 +188,35 @@ class AgentResponse(BaseModel):
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ProgressEventBase(BaseModel):
+    kind: Literal["start", "progress", "result", "error", "done"]
+    flow: Literal["stock_analysis", "agent_query"]
+    stage: str
+    progress_pct: int = Field(ge=0, le=100)
+    message: Optional[str] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StockAnalysisProgressEvent(ProgressEventBase):
+    flow: Literal["stock_analysis"] = "stock_analysis"
+    stock_code: Optional[str] = None
+    payload: Optional[StockAnalysisResponse] = None
+
+
+class AgentProgressEvent(ProgressEventBase):
+    flow: Literal["agent_query"] = "agent_query"
+    payload: Optional[AgentResponse] = None
+
+
+class ProgressErrorEvent(ProgressEventBase):
+    kind: Literal["error"] = "error"
+
+
+class ProgressDoneEvent(ProgressEventBase):
+    kind: Literal["done"] = "done"
+    progress_pct: int = 100
+
+
 class UserSettingsResponse(BaseModel):
     llm_model: str
     llm_model_source: Literal["env", "user"] = "env"

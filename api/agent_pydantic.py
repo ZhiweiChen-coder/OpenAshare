@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
@@ -27,6 +27,7 @@ from api.schemas import AgentResponse
 from api.services import (
     HotspotService,
     NewsService,
+    ProgressCallback,
     PortfolioService,
     StockAnalysisService,
     WebSearchService,
@@ -106,6 +107,11 @@ class AgentDeps:
     portfolio_service: PortfolioService
     web_search_service: WebSearchService
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
+    progress_callback: Optional[ProgressCallback] = None
+
+    def report(self, stage: str, progress_pct: int, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+        if self.progress_callback:
+            self.progress_callback(stage, progress_pct, message, meta)
 
 
 def create_agent(
@@ -139,11 +145,13 @@ def create_agent(
         """Search stocks by name or code. Returns matching stock name/code list."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 35, "正在识别股票目标", {"tool": "search_stocks"})
             results = await asyncio.to_thread(
                 deps.stock_service.search_stocks, query, max_results=limit
             )
             out = [{"name": r.name, "code": r.code, "market": r.market} for r in results]
             deps.tool_results.append({"tool": "search_stocks", "data": [r.model_dump() for r in results]})
+            deps.report("tool_completed", 48, "股票目标识别完成", {"tool": "search_stocks"})
             return f"Found {len(results)} stocks: " + ", ".join(f"{r.name}({r.code})" for r in results)
         except Exception as e:
             return f"Search failed: {e}"
@@ -153,10 +161,12 @@ def create_agent(
         """Get technical analysis and quote for a stock by code (e.g. sh600036, sz000001)."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, f"正在获取 {stock_code} 的技术分析", {"tool": "get_stock_analysis"})
             analysis = await asyncio.to_thread(
                 deps.stock_service.get_stock_analysis, stock_code, False
             )
             deps.tool_results.append({"tool": "get_stock_analysis", "data": analysis.model_dump()})
+            deps.report("tool_completed", 60, "技术分析已完成", {"tool": "get_stock_analysis"})
             s = analysis.signal_summary
             return (
                 f"{analysis.stock_name}({analysis.stock_code}) "
@@ -170,10 +180,12 @@ def create_agent(
         """Get recent news for a stock by code."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, f"正在获取 {stock_code} 的个股消息", {"tool": "get_stock_news"})
             items = await asyncio.to_thread(
                 deps.news_service.get_stock_news, stock_code, limit=limit
             )
             deps.tool_results.append({"tool": "get_stock_news", "data": [n.model_dump() for n in items]})
+            deps.report("tool_completed", 58, "个股消息已获取完成", {"tool": "get_stock_news"})
             if not items:
                 return f"No news for {stock_code}."
             return f"Found {len(items)} news items. Latest: {items[0].title}"
@@ -185,10 +197,12 @@ def create_agent(
         """Get global/macro news (finance, tech, geopolitics)."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, "正在获取全球新闻摘要", {"tool": "get_global_news"})
             items = await asyncio.to_thread(
                 deps.news_service.get_global_news, limit=limit
             )
             deps.tool_results.append({"tool": "get_global_news", "data": [n.model_dump() for n in items]})
+            deps.report("tool_completed", 58, "全球新闻摘要已获取完成", {"tool": "get_global_news"})
             if not items:
                 return "No global news available."
             return f"Found {len(items)} global news. Top: " + "; ".join(n.title[:40] for n in items[:3])
@@ -200,10 +214,12 @@ def create_agent(
         """List current market hotspots and related stocks."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, "正在获取热点列表", {"tool": "list_hotspots"})
             items = await asyncio.to_thread(
                 deps.hotspot_service.list_hotspots, limit=limit
             )
             deps.tool_results.append({"tool": "list_hotspots", "data": [h.model_dump() for h in items]})
+            deps.report("tool_completed", 58, "热点列表已获取完成", {"tool": "list_hotspots"})
             if not items:
                 return "No hotspots data."
             return "Hotspots: " + "; ".join(f"{h.topic_name}(heat {h.heat_score:.0f})" for h in items[:5])
@@ -215,10 +231,12 @@ def create_agent(
         """Search the web for latest news/articles (e.g. OpenAI, Iran, Fed)."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 45, "正在联网检索网页结果", {"tool": "web_search"})
             results = await asyncio.to_thread(
                 deps.web_search_service.search, query, limit=limit
             )
             deps.tool_results.append({"tool": "web_search", "data": [r.model_dump() for r in results]})
+            deps.report("tool_completed", 65, "网页检索已完成", {"tool": "web_search"})
             if not results:
                 return "No web results."
             return "Web results: " + "; ".join(r.title[:50] for r in results[:3])
@@ -230,8 +248,10 @@ def create_agent(
         """Get current portfolio positions and PnL analysis."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, "正在获取持仓组合分析", {"tool": "get_portfolio_analysis"})
             analysis = await asyncio.to_thread(deps.portfolio_service.analyze_portfolio)
             deps.tool_results.append({"tool": "get_portfolio_analysis", "data": analysis.model_dump()})
+            deps.report("tool_completed", 58, "持仓组合分析已完成", {"tool": "get_portfolio_analysis"})
             return (
                 f"Portfolio: total_pnl={analysis.total_pnl:.2f}, "
                 f"pnl_pct={analysis.total_pnl_pct:.2f}%, "
@@ -245,6 +265,7 @@ def create_agent(
         """Get detail for a hotspot topic (related news and stocks)."""
         deps = ctx.deps
         try:
+            deps.report("tool_running", 40, "正在获取热点详情", {"tool": "get_hotspot_detail"})
             detail = await asyncio.to_thread(
                 deps.hotspot_service.get_hotspot_detail, topic_name
             )
@@ -255,6 +276,7 @@ def create_agent(
                     "related_news": [n.model_dump() for n in detail.related_news],
                 },
             })
+            deps.report("tool_completed", 58, "热点详情已获取完成", {"tool": "get_hotspot_detail"})
             return f"Topic {topic_name}: {len(detail.related_news)} related news."
         except Exception as e:
             return f"Hotspot detail failed: {e}"
@@ -348,9 +370,11 @@ async def run_agent_async(
     agent: Agent[AgentDeps, AgentOutput],
     deps: AgentDeps,
     user_query: str,
+    progress_callback: Optional[Callable[[str, int, str, Optional[Dict[str, Any]]], None]] = None,
 ) -> AgentResponse:
     """Run the agent and return the chat response."""
     deps.tool_results.clear()
+    deps.progress_callback = progress_callback
     result = await agent.run(user_query.strip(), deps=deps)
     if result.output is None:
         return AgentResponse(
@@ -360,6 +384,7 @@ async def run_agent_async(
             citations=[],
             payload={},
         )
+    deps.report("compose_response", 85, "正在整理最终回答")
     return build_agent_response(result.output, deps.tool_results)
 
 

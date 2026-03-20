@@ -85,6 +85,9 @@ button, input, textarea { font: inherit; }
 .app-shell.sidebar-closed .main-content {
   margin-right: var(--sidebar-width-closed);
 }
+.app-shell.no-sidebar .main-content {
+  margin-right: 0;
+}
 .agent-sidebar {
   position: fixed;
   top: var(--nav-height);

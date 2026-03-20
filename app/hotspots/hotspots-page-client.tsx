@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -14,6 +14,7 @@ export function HotspotsPageClient() {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
   const sortedHotspots = [...hotspots].sort((a, b) => {
     if (a.topic_name === topicParam) return -1;
@@ -22,7 +23,7 @@ export function HotspotsPageClient() {
   });
   const selectedTopic = sortedHotspots.find((i) => i.topic_name === topicParam) ?? sortedHotspots[0] ?? null;
 
-  useEffect(() => {
+  const loadHotspots = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -56,6 +57,8 @@ export function HotspotsPageClient() {
       .finally(() => setDetailLoading(false));
   }, []);
 
+  useEffect(() => loadHotspots(), [loadHotspots]);
+
   useEffect(() => {
     if (!selectedTopic) {
       setDetail(null);
@@ -64,9 +67,26 @@ export function HotspotsPageClient() {
     loadDetail(selectedTopic.topic_name);
   }, [selectedTopic?.topic_name, loadDetail]);
 
+  const refreshPage = useCallback(() => {
+    setManualRefreshing(true);
+    const cleanup = loadHotspots();
+    if (selectedTopic) {
+      loadDetail(selectedTopic.topic_name);
+    }
+    window.setTimeout(() => {
+      cleanup();
+      setManualRefreshing(false);
+    }, 400);
+  }, [loadDetail, loadHotspots, selectedTopic]);
+
   return (
     <>
-        <section className="panel section news-hero">
+      <section className="panel section news-hero">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <button className="button ghost" type="button" onClick={refreshPage} disabled={manualRefreshing}>
+            {manualRefreshing ? "刷新中..." : "手动刷新"}
+          </button>
+        </div>
         <div className="section-kicker">Sector Radar</div>
         <h1>热点板块</h1>
         <p className="muted">

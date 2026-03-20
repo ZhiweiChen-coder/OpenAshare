@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getGlobalNews, queryAgent } from "@/lib/api";
-import type { GlobalNewsItem } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getGlobalNews, streamAgentQuery } from "@/lib/api";
+import type { AgentProgressEvent, GlobalNewsItem } from "@/lib/types";
 
 type SummarySection = {
   title: string;
@@ -19,37 +19,22 @@ type AgentSummary = {
 type BlockStatus = "idle" | "loading" | "ok" | "error";
 
 const AGENT_PROMPT = "今日全球热点和科技大事是什么";
-/** Agent 很慢时不能拖死整页：超时后显示错误，新闻仍可展示 */
 const AGENT_TIMEOUT_MS = 35_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`${label}（${Math.round(ms / 1000)}s 超时）`)), ms);
-    promise.then(
-      (v) => {
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(t);
-        reject(e);
-      },
-    );
-  });
-}
-
 export function NewsPageClient() {
+  const agentAbortRef = useRef<AbortController | null>(null);
   const [agentStatus, setAgentStatus] = useState<BlockStatus>("idle");
   const [agentResponse, setAgentResponse] = useState<AgentSummary | null>(null);
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentProgress, setAgentProgress] = useState("正在连接 Agent...");
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
   const [newsStatus, setNewsStatus] = useState<BlockStatus>("idle");
   const [globalNews, setGlobalNews] = useState<GlobalNewsItem[]>([]);
   const [newsError, setNewsError] = useState<string | null>(null);
   const [selectedNews, setSelectedNews] = useState<GlobalNewsItem | null>(null);
 
-  // 全球新闻：独立加载，不依赖 Agent
-  useEffect(() => {
+  const loadNews = useCallback(() => {
     let cancelled = false;
     setNewsStatus("loading");
     setNewsError(null);
@@ -60,10 +45,10 @@ export function NewsPageClient() {
           setNewsStatus("ok");
         }
       })
-      .catch((e) => {
+      .catch((error) => {
         if (!cancelled) {
           setGlobalNews([]);
-          setNewsError(e instanceof Error ? e.message : "未知错误");
+          setNewsError(error instanceof Error ? error.message : "未知错误");
           setNewsStatus("error");
         }
       });
@@ -72,25 +57,82 @@ export function NewsPageClient() {
     };
   }, []);
 
-  // Agent 摘要：独立加载 + 超时，失败不影响新闻区
   const loadAgent = useCallback(() => {
+    agentAbortRef.current?.abort();
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort("timeout"), AGENT_TIMEOUT_MS);
+    agentAbortRef.current = controller;
+
     setAgentStatus("loading");
     setAgentError(null);
-    withTimeout(queryAgent(AGENT_PROMPT), AGENT_TIMEOUT_MS, "Agent 请求超时")
-      .then((r) => {
-        setAgentResponse({ intent: r.intent, summary: r.summary, actions: r.actions });
+    setAgentResponse(null);
+    setAgentProgress("正在连接 Agent...");
+
+    streamAgentQuery(AGENT_PROMPT, [], undefined, {
+      signal: controller.signal,
+      onStart: (event) => {
+        setAgentProgress(event.message || "正在连接 Agent...");
+      },
+      onProgress: (event: AgentProgressEvent) => {
+        setAgentProgress(event.message || "正在整理今日重点...");
+      },
+      onResult: (event) => {
+        if (!event.payload) {
+          return;
+        }
+        setAgentResponse({
+          intent: event.payload.intent,
+          summary: event.payload.summary,
+          actions: event.payload.actions,
+        });
         setAgentStatus("ok");
-      })
-      .catch((e) => {
+      },
+      onError: (event) => {
         setAgentResponse(null);
-        setAgentError(e instanceof Error ? e.message : "未知错误");
+        setAgentError(event.message || "未知错误");
         setAgentStatus("error");
+      },
+    })
+      .catch((error) => {
+        if (controller.signal.aborted && controller.signal.reason !== "timeout") {
+          return;
+        }
+        setAgentResponse(null);
+        setAgentError(
+          controller.signal.reason === "timeout"
+            ? `Agent 请求超时（${Math.round(AGENT_TIMEOUT_MS / 1000)}s）`
+            : error instanceof Error
+              ? error.message
+              : "未知错误",
+        );
+        setAgentStatus("error");
+      })
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        if (agentAbortRef.current === controller) {
+          agentAbortRef.current = null;
+        }
       });
   }, []);
 
+  useEffect(() => loadNews(), [loadNews]);
+
   useEffect(() => {
     loadAgent();
+    return () => {
+      agentAbortRef.current?.abort();
+    };
   }, [loadAgent]);
+
+  const refreshPage = useCallback(() => {
+    setManualRefreshing(true);
+    const cleanup = loadNews();
+    loadAgent();
+    window.setTimeout(() => {
+      cleanup();
+      setManualRefreshing(false);
+    }, 400);
+  }, [loadAgent, loadNews]);
 
   const leadNews = globalNews[0] ?? null;
   const secondaryNews = globalNews.slice(1, 7);
@@ -101,15 +143,19 @@ export function NewsPageClient() {
   return (
     <>
       <section className="panel section news-hero">
-        <div className="section-kicker">News Desk</div>
-        <h1>消息页</h1>
-        <p className="muted">
-          汇总全球重点新闻，并用 Agent 自动提炼今日对市场最重要的几件事。
-        </p>
+        <div className="news-section-head">
+          <div>
+            <div className="section-kicker">News Desk</div>
+            <h1>消息页</h1>
+            <p className="muted">汇总全球重点新闻，并用 Agent 自动提炼今日对市场最重要的几件事。</p>
+          </div>
+          <button className="button ghost" type="button" onClick={refreshPage} disabled={manualRefreshing}>
+            {manualRefreshing ? "刷新中..." : "手动刷新"}
+          </button>
+        </div>
       </section>
 
       <section className="news-stack-layout">
-        {/* —— Agent 块 —— */}
         <section className="panel section news-summary-panel">
           <div className="news-section-head">
             <div>
@@ -127,7 +173,8 @@ export function NewsPageClient() {
 
           {agentStatus === "loading" ? (
             <div className="news-agent-skeleton">
-              <p className="muted">Agent 正在整理今日重点，请稍候…</p>
+              <p className="muted">{agentProgress}</p>
+              <p className="muted">Agent 正在整理今日重点，请稍候...</p>
               <div className="news-skeleton-lines">
                 <span />
                 <span />
@@ -136,11 +183,7 @@ export function NewsPageClient() {
             </div>
           ) : null}
 
-          {agentStatus === "error" ? (
-            <p className="muted">
-              Agent 摘要加载失败：{agentError}
-            </p>
-          ) : null}
+          {agentStatus === "error" ? <p className="muted">Agent 摘要加载失败：{agentError}</p> : null}
 
           {agentStatus === "ok" && agentResponse ? (
             <>
@@ -196,10 +239,9 @@ export function NewsPageClient() {
             </>
           ) : null}
 
-          {agentStatus === "idle" ? <p className="muted">等待加载…</p> : null}
+          {agentStatus === "idle" ? <p className="muted">等待加载...</p> : null}
         </section>
 
-        {/* —— 全球新闻块（独立状态）—— */}
         {newsStatus === "loading" ? (
           <section className="panel section news-lead-panel">
             <div className="news-section-head">
@@ -231,21 +273,7 @@ export function NewsPageClient() {
         {newsStatus === "error" ? (
           <section className="panel section news-warning-strip">
             <p className="muted">全球新闻加载失败：{newsError}</p>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => {
-                setNewsStatus("loading");
-                setNewsError(null);
-                getGlobalNews()
-                  .then(setGlobalNews)
-                  .then(() => setNewsStatus("ok"))
-                  .catch((e) => {
-                    setNewsError(e instanceof Error ? e.message : "未知错误");
-                    setNewsStatus("error");
-                  });
-              }}
-            >
+            <button className="button ghost" type="button" onClick={loadNews}>
               重试新闻
             </button>
           </section>
@@ -307,9 +335,7 @@ export function NewsPageClient() {
                 <div className="news-tag-row">
                   <span className="tag">影响 {leadNews.impact_level}</span>
                   <span className="tag">{labelSentiment(leadNews.sentiment)}</span>
-                  {formatRegionLabel(leadNews.region) ? (
-                    <span className="tag">{formatRegionLabel(leadNews.region)}</span>
-                  ) : null}
+                  {formatRegionLabel(leadNews.region) ? <span className="tag">{formatRegionLabel(leadNews.region)}</span> : null}
                   <span className="tag">点击查看详情</span>
                 </div>
               </article>
@@ -351,11 +377,7 @@ export function NewsPageClient() {
       </section>
 
       {selectedNews ? (
-        <div
-          className="news-detail-overlay"
-          onClick={() => setSelectedNews(null)}
-          role="presentation"
-        >
+        <div className="news-detail-overlay" onClick={() => setSelectedNews(null)} role="presentation">
           <section
             className="news-detail-modal"
             onClick={(event) => event.stopPropagation()}
@@ -379,9 +401,7 @@ export function NewsPageClient() {
               <span className="tag">{selectedNews.topic}</span>
               <span className="tag">影响 {selectedNews.impact_level}</span>
               <span className="tag">{labelSentiment(selectedNews.sentiment)}</span>
-              {formatRegionLabel(selectedNews.region) ? (
-                <span className="tag">{formatRegionLabel(selectedNews.region)}</span>
-              ) : null}
+              {formatRegionLabel(selectedNews.region) ? <span className="tag">{formatRegionLabel(selectedNews.region)}</span> : null}
             </div>
 
             <div className="news-detail-body">
@@ -443,20 +463,16 @@ function formatRegionLabel(region?: GlobalNewsItem["region"]) {
 function formatNewsTitle(item: GlobalNewsItem) {
   const raw = (item.title || "").trim();
   const summary = (item.summary || "").trim();
-
-  // 1) 如果标题本身不长，直接用
   if (raw && raw.length <= 60) {
     return raw;
   }
 
-  // 2) 处理类似「xxx】今天（3 月...」这种，把第一个全角右括号前的内容当标题
   const source = raw || summary;
   const index = source.indexOf("】");
   if (index > 0 && index < 80) {
-    return `${source.slice(0, index + 1).trim()}`;
+    return source.slice(0, index + 1).trim();
   }
 
-  // 3) 回退：截断到 60 字
   return truncate(source || "全球重点新闻", 60);
 }
 

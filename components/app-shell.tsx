@@ -7,25 +7,29 @@ import { AgentChat } from "@/components/agent-chat";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const pathname = usePathname();
+  const isLanding = pathname === "/";
 
   return (
-    <div className={`app-shell ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
-      <div className="main-content">
-        {children}
-      </div>
-      <button
-        type="button"
-        className={`agent-sidebar-tab ${sidebarOpen ? "open" : "closed"}`}
-        onClick={() => setSidebarOpen((o) => !o)}
-        aria-label={sidebarOpen ? "Close Agent sidebar" : "Open Agent sidebar"}
-      >
-        Agent
-      </button>
-      <aside className={`agent-sidebar ${sidebarOpen ? "open" : "closed"}`}>
-        <div className="sidebar-body">
-          <AgentChat compact />
-        </div>
-      </aside>
+    <div className={`app-shell ${isLanding ? "no-sidebar" : (sidebarOpen ? "sidebar-open" : "sidebar-closed")}`}>
+      <div className="main-content">{children}</div>
+      {!isLanding && (
+        <>
+          <button
+            type="button"
+            className={`agent-sidebar-tab ${sidebarOpen ? "open" : "closed"}`}
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-label={sidebarOpen ? "Close Agent sidebar" : "Open Agent sidebar"}
+          >
+            Agent
+          </button>
+          <aside className={`agent-sidebar ${sidebarOpen ? "open" : "closed"}`}>
+            <div className="sidebar-body">
+              <AgentChat compact />
+            </div>
+          </aside>
+        </>
+      )}
     </div>
   );
 }
@@ -33,7 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 const NAV_ITEMS = [
   { href: "/dashboard", label: "工作台" },
   { href: "/stocks", label: "单股分析" },
-  { href: "/charts", label: "K 线图" },
+  { href: "/charts", label: "K线图" },
   { href: "/portfolio", label: "持仓页" },
   { href: "/news", label: "消息页" },
   { href: "/hotspots", label: "热点页" },
