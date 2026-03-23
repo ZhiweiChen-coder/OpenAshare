@@ -235,6 +235,7 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     setProgressPct(0);
     setActiveTool(null);
     const history = buildAgentHistory(messages);
+    let encounteredError = false;
 
     startTransition(async () => {
       try {
@@ -255,11 +256,19 @@ export function AgentChat({ compact = false }: AgentChatProps) {
           onResult: (event: AgentProgressEvent) => {
             if (event.payload) {
               appendAgentResponse(event.payload);
+            } else {
+              // Payload missing — show event message as a fallback so the user gets some response
+              appendMessage({
+                id: createId("msg"),
+                role: "agent",
+                content: event.message || "回答已生成，但内容为空。",
+              });
             }
             setCurrentStageLabel(event.message || "回答已生成");
             setProgressPct(event.progress_pct ?? 100);
           },
           onError: (event: AgentProgressEvent) => {
+            encounteredError = true;
             setStreamState("error");
             appendMessage({
               id: createId("msg"),
@@ -268,7 +277,9 @@ export function AgentChat({ compact = false }: AgentChatProps) {
             });
           },
           onDone: () => {
-            setStreamState("completed");
+            if (!encounteredError) {
+              setStreamState("completed");
+            }
             setPendingQuery("");
           },
         });

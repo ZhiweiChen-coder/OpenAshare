@@ -19,7 +19,7 @@ type AgentSummary = {
 type BlockStatus = "idle" | "loading" | "ok" | "error";
 
 const AGENT_PROMPT = "今日全球热点和科技大事是什么";
-const AGENT_TIMEOUT_MS = 35_000;
+const AGENT_TIMEOUT_MS = 90_000;
 
 export function NewsPageClient() {
   const agentAbortRef = useRef<AbortController | null>(null);

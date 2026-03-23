@@ -155,6 +155,38 @@ npm run dev
 export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
+### Vercel + Oracle 部署
+
+如果前端部署到 Vercel、后端部署到 Oracle VM，建议这样配置：
+
+前端 Vercel 环境变量：
+
+```env
+BACKEND_BASE_URL=https://your-backend-domain.com
+```
+
+后端环境变量：
+
+```env
+CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://your-custom-domain.com
+```
+
+如果你想允许 Vercel preview deployment，可以再加：
+
+```env
+CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app
+```
+
+如果还要保留本地开发：
+
+```env
+CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,http://localhost:3000,http://127.0.0.1:3000
+```
+
+说明：
+- 前端所有 `/api/*` 请求会先进入 Vercel，再由 Next.js 的代理路由转发到后端。
+- 后端只需要允许你的 Vercel 域名，不需要对外开放 `*`。
+
 ### 方式二：Docker 部署
 
 #### 1. 准备环境变量

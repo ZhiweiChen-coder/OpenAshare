@@ -191,9 +191,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+def _load_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ALLOWED_ORIGINS", "")
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    defaults = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    if origins:
+        return origins
+    return defaults
+
+
+def _load_cors_origin_regex() -> str:
+    value = os.getenv("CORS_ALLOWED_ORIGIN_REGEX", "").strip()
+    return value
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_load_cors_origins(),
+    allow_origin_regex=_load_cors_origin_regex() or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -907,28 +925,40 @@ def _maybe_run_heartbeat(session_id: Optional[str]) -> dict[str, Any]:
 
 
 def _merge_agent_history(payload: AgentQuery) -> List[AgentHistoryTurn]:
-    merged: List[AgentHistoryTurn] = []
-    seen_keys: set[tuple[str, str]] = set()
     persisted = agent_memory_store.get_recent_history(payload.session_id or "", limit=12)
-    for item in persisted:
-        turn = AgentHistoryTurn(
+    persisted_turns = [
+        AgentHistoryTurn(
             role=str(item.get("role", "user")),
             content=str(item.get("content", "")),
             intent=item.get("intent"),
             stock_code=item.get("stock_code"),
             stock_name=item.get("stock_name"),
         )
-        key = (turn.role, turn.content)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        merged.append(turn)
-    for turn in payload.history:
-        key = (turn.role, turn.content)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        merged.append(turn)
+        for item in persisted
+    ]
+    client_turns = list(payload.history)
+    if not persisted_turns:
+        return client_turns[-12:]
+    if not client_turns:
+        return persisted_turns[-12:]
+
+    def turn_key(turn: AgentHistoryTurn) -> tuple[str, str, Optional[str], Optional[str], Optional[str]]:
+        return (
+            turn.role,
+            turn.content,
+            turn.intent,
+            turn.stock_code,
+            turn.stock_name,
+        )
+
+    overlap = 0
+    max_overlap = min(len(persisted_turns), len(client_turns))
+    for size in range(max_overlap, 0, -1):
+        if [turn_key(turn) for turn in persisted_turns[-size:]] == [turn_key(turn) for turn in client_turns[:size]]:
+            overlap = size
+            break
+
+    merged = persisted_turns + client_turns[overlap:]
     return merged[-12:]
 
 

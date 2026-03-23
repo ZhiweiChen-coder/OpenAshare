@@ -114,6 +114,14 @@ class AgentDeps:
             self.progress_callback(stage, progress_pct, message, meta)
 
 
+def _bounded_limit(value: int, *, default: int, minimum: int = 1, maximum: int) -> int:
+    try:
+        normalized = int(value)
+    except Exception:
+        normalized = default
+    return max(minimum, min(normalized, maximum))
+
+
 def create_agent(
     *,
     api_key: Optional[str] = None,
@@ -145,6 +153,7 @@ def create_agent(
         """Search stocks by name or code. Returns matching stock name/code list."""
         deps = ctx.deps
         try:
+            limit = _bounded_limit(limit, default=5, maximum=5)
             deps.report("tool_running", 35, "正在识别股票目标", {"tool": "search_stocks"})
             results = await asyncio.to_thread(
                 deps.stock_service.search_stocks, query, max_results=limit
@@ -180,6 +189,7 @@ def create_agent(
         """Get recent news for a stock by code."""
         deps = ctx.deps
         try:
+            limit = _bounded_limit(limit, default=10, maximum=10)
             deps.report("tool_running", 40, f"正在获取 {stock_code} 的个股消息", {"tool": "get_stock_news"})
             items = await asyncio.to_thread(
                 deps.news_service.get_stock_news, stock_code, limit=limit
@@ -197,6 +207,7 @@ def create_agent(
         """Get global/macro news (finance, tech, geopolitics)."""
         deps = ctx.deps
         try:
+            limit = _bounded_limit(limit, default=10, maximum=10)
             deps.report("tool_running", 40, "正在获取全球新闻摘要", {"tool": "get_global_news"})
             items = await asyncio.to_thread(
                 deps.news_service.get_global_news, limit=limit
@@ -214,6 +225,7 @@ def create_agent(
         """List current market hotspots and related stocks."""
         deps = ctx.deps
         try:
+            limit = _bounded_limit(limit, default=8, maximum=8)
             deps.report("tool_running", 40, "正在获取热点列表", {"tool": "list_hotspots"})
             items = await asyncio.to_thread(
                 deps.hotspot_service.list_hotspots, limit=limit
@@ -231,6 +243,7 @@ def create_agent(
         """Search the web for latest news/articles (e.g. OpenAI, Iran, Fed)."""
         deps = ctx.deps
         try:
+            limit = _bounded_limit(limit, default=3, maximum=3)
             deps.report("tool_running", 45, "正在联网检索网页结果", {"tool": "web_search"})
             results = await asyncio.to_thread(
                 deps.web_search_service.search, query, limit=limit
