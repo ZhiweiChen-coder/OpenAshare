@@ -14,11 +14,15 @@ export async function GET(request: Request, context: { params: Promise<{ stockCo
   const backendUrl = `${BACKEND.replace(/\/$/, "")}/api/stocks/${encodeURIComponent(stockCode)}/analysis/stream?include_ai=${encodeURIComponent(includeAi)}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), STOCK_TIMEOUT_MS);
+  const headers = new Headers(request.headers);
+  headers.set("Accept", "text/event-stream");
+  headers.delete("host");
+  headers.delete("content-length");
 
   try {
     const res = await fetch(backendUrl, {
       method: "GET",
-      headers: { Accept: "text/event-stream" },
+      headers,
       cache: "no-store",
       signal: controller.signal,
     });

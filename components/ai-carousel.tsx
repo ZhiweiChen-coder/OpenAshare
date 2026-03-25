@@ -10,7 +10,7 @@ type TopicCard = {
 };
 
 function splitToTopicCards(markdown: string): TopicCard[] {
-  const text = (markdown || "").trim();
+  const text = normalizeAnalysisMarkdown(markdown);
   if (!text) return [];
 
   const lines = text.split("\n");
@@ -46,6 +46,17 @@ function splitToTopicCards(markdown: string): TopicCard[] {
   return cards.slice(0, 10);
 }
 
+function normalizeAnalysisMarkdown(markdown: string): string {
+  const text = (markdown || "").trim();
+  if (!text) return "";
+
+  return text
+    .replace(/\s+-\s(?=[^\s])/g, "\n- ")
+    .replace(/([：:])\s+\*\s(?=[^\s])/g, "$1\n* ")
+    .replace(/\s+\*\s(?=[A-Za-z0-9\u4e00-\u9fa5])/g, "\n* ")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 export function AICarousel({ content }: { content: string }) {
   const cards = useMemo(() => splitToTopicCards(content), [content]);
   const [index, setIndex] = useState(0);
@@ -71,7 +82,7 @@ export function AICarousel({ content }: { content: string }) {
     <div className="ai-carousel">
       <div className="ai-carousel-top">
         <div>
-          <div className="muted ai-carousel-kicker">Topic {index + 1} / {cards.length}</div>
+          <div className="muted ai-carousel-kicker">分析段落 {index + 1} / {cards.length}</div>
           <h3 className="ai-carousel-title">{active.title}</h3>
         </div>
         <div className="ai-carousel-actions">
@@ -105,4 +116,3 @@ export function AICarousel({ content }: { content: string }) {
     </div>
   );
 }
-

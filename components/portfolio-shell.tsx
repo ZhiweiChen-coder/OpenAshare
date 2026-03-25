@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 
+import { DemoAccessGate } from "@/components/demo-access-gate";
+import { useDemoAccess } from "@/components/demo-access-provider";
 import {
   createPortfolioPosition,
   getPortfolioAnalysis,
@@ -44,6 +46,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export function PortfolioShell({ initialPositions, initialAnalysis, initialPrefill }: Props) {
+  const { loaded, unlocked } = useDemoAccess();
   const [positions, setPositions] = useState(initialPositions);
   const [analysis, setAnalysis] = useState(initialAnalysis);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -192,6 +195,17 @@ export function PortfolioShell({ initialPositions, initialAnalysis, initialPrefi
         setMessage(`删除失败: ${error instanceof Error ? error.message : "未知错误"}`);
       }
     });
+  }
+
+  if (loaded && !unlocked) {
+    return (
+      <section className="panel section">
+        <DemoAccessGate
+          title="持仓管理已锁定"
+          description="解锁后可以录入持仓、编辑仓位并查看组合分析。"
+        />
+      </section>
+    );
   }
 
   return (

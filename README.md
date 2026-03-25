@@ -155,20 +155,33 @@ npm run dev
 export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-### Vercel + Oracle 部署
+### Oracle + Vercel 部署
 
-如果前端部署到 Vercel、后端部署到 Oracle VM，建议这样配置：
+推荐的线上形态是：
+
+- Oracle VM 只跑 FastAPI 后端
+- Vercel 跑 Next.js 前端
+- Cloudflare 负责对外域名
+
+Oracle 这台机器只需要暴露后端，不再运行 `next build` 或 `next start`。部署说明见 [deploy/oracle/README.md](./deploy/oracle/README.md)。
+
+推荐的域名拆分：
+
+- `openashare.com` 和 `www.openashare.com` 指向 Vercel
+- `api.openashare.com` 指向 Oracle VM
 
 前端 Vercel 环境变量：
 
 ```env
-BACKEND_BASE_URL=https://your-backend-domain.com
+BACKEND_BASE_URL=https://api.openashare.com
 ```
 
-后端环境变量：
+后端 Oracle 环境变量：
 
 ```env
-CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,https://your-custom-domain.com
+CORS_ALLOWED_ORIGINS=https://openashare.com,https://www.openashare.com,https://your-project.vercel.app
+DEMO_ACCESS_CODE=your_demo_code
+DEMO_ACCESS_SECRET=your_demo_secret
 ```
 
 如果你想允许 Vercel preview deployment，可以再加：
@@ -180,12 +193,13 @@ CORS_ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app
 如果还要保留本地开发：
 
 ```env
-CORS_ALLOWED_ORIGINS=https://your-project.vercel.app,http://localhost:3000,http://127.0.0.1:3000
+CORS_ALLOWED_ORIGINS=https://openashare.com,https://www.openashare.com,https://your-project.vercel.app,http://localhost:3000,http://127.0.0.1:3000
 ```
 
 说明：
-- 前端所有 `/api/*` 请求会先进入 Vercel，再由 Next.js 的代理路由转发到后端。
-- 后端只需要允许你的 Vercel 域名，不需要对外开放 `*`。
+- 前端在浏览器侧继续走同源 `/api/*`，由 Vercel 的 Next.js 路由转发到后端。
+- 后端只需要允许你的前端域名，不需要对外开放 `*`。
+- Oracle VM 只跑后端 API，Nginx 只反代到 `127.0.0.1:8000`。
 
 ### 方式二：Docker 部署
 

@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getGlobalNews, streamAgentQuery } from "@/lib/api";
-import type { AgentProgressEvent, GlobalNewsItem } from "@/lib/types";
+import { DemoAccessGate } from "@/components/demo-access-gate";
+import { useDemoAccess } from "@/components/demo-access-provider";
+import { getGlobalNews, queryAgent } from "@/lib/api";
+import type { GlobalNewsItem } from "@/lib/types";
 
 type SummarySection = {
   title: string;
@@ -22,6 +24,7 @@ const AGENT_PROMPT = "今日全球热点和科技大事是什么";
 const AGENT_TIMEOUT_MS = 90_000;
 
 export function NewsPageClient() {
+  const { loaded, unlocked } = useDemoAccess();
   const agentAbortRef = useRef<AbortController | null>(null);
   const [agentStatus, setAgentStatus] = useState<BlockStatus>("idle");
   const [agentResponse, setAgentResponse] = useState<AgentSummary | null>(null);
@@ -58,6 +61,9 @@ export function NewsPageClient() {
   }, []);
 
   const loadAgent = useCallback(() => {
+    if (!unlocked) {
+      return;
+    }
     agentAbortRef.current?.abort();
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort("timeout"), AGENT_TIMEOUT_MS);
@@ -68,31 +74,17 @@ export function NewsPageClient() {
     setAgentResponse(null);
     setAgentProgress("正在连接 Agent...");
 
-    streamAgentQuery(AGENT_PROMPT, [], undefined, {
-      signal: controller.signal,
-      onStart: (event) => {
-        setAgentProgress(event.message || "正在连接 Agent...");
-      },
-      onProgress: (event: AgentProgressEvent) => {
-        setAgentProgress(event.message || "正在整理今日重点...");
-      },
-      onResult: (event) => {
-        if (!event.payload) {
-          return;
-        }
+    setAgentProgress("正在整理今日重点...");
+
+    queryAgent(AGENT_PROMPT)
+      .then((response) => {
         setAgentResponse({
-          intent: event.payload.intent,
-          summary: event.payload.summary,
-          actions: event.payload.actions,
+          intent: response.intent,
+          summary: response.summary,
+          actions: response.actions,
         });
         setAgentStatus("ok");
-      },
-      onError: (event) => {
-        setAgentResponse(null);
-        setAgentError(event.message || "未知错误");
-        setAgentStatus("error");
-      },
-    })
+      })
       .catch((error) => {
         if (controller.signal.aborted && controller.signal.reason !== "timeout") {
           return;
@@ -113,32 +105,41 @@ export function NewsPageClient() {
           agentAbortRef.current = null;
         }
       });
-  }, []);
+  }, [unlocked]);
 
   useEffect(() => loadNews(), [loadNews]);
 
   useEffect(() => {
+    if (!unlocked) {
+      setAgentStatus("idle");
+      setAgentResponse(null);
+      setAgentError(null);
+      return;
+    }
     loadAgent();
     return () => {
       agentAbortRef.current?.abort();
     };
-  }, [loadAgent]);
+  }, [loadAgent, unlocked]);
 
   const refreshPage = useCallback(() => {
     setManualRefreshing(true);
     const cleanup = loadNews();
-    loadAgent();
+    if (unlocked) {
+      loadAgent();
+    }
     window.setTimeout(() => {
       cleanup();
       setManualRefreshing(false);
     }, 400);
-  }, [loadAgent, loadNews]);
+  }, [loadAgent, loadNews, unlocked]);
 
   const leadNews = globalNews[0] ?? null;
   const secondaryNews = globalNews.slice(1, 7);
   const summarySections = useMemo(() => parseSummarySections(agentResponse?.summary), [agentResponse?.summary]);
   const summaryLead = useMemo(() => buildSummaryLead(summarySections), [summarySections]);
   const topicGroups = useMemo(() => buildTopicGroups(globalNews), [globalNews]);
+  const showAgentGate = loaded && !unlocked;
 
   return (
     <>
@@ -162,16 +163,24 @@ export function NewsPageClient() {
               <div className="section-kicker">Agent Summary</div>
               <h2>今日判断</h2>
             </div>
-            {agentStatus === "loading" ? <span className="pill">加载中</span> : null}
-            {agentStatus === "ok" && agentResponse ? <span className="pill">{agentResponse.intent}</span> : null}
-            {agentStatus === "error" ? (
+            {showAgentGate ? <span className="pill">未解锁</span> : null}
+            {!showAgentGate && agentStatus === "loading" ? <span className="pill">加载中</span> : null}
+            {!showAgentGate && agentStatus === "ok" && agentResponse ? <span className="pill">{agentResponse.intent}</span> : null}
+            {!showAgentGate && agentStatus === "error" ? (
               <button className="button ghost" type="button" onClick={loadAgent}>
                 重试 Agent
               </button>
             ) : null}
           </div>
 
-          {agentStatus === "loading" ? (
+          {showAgentGate ? (
+            <DemoAccessGate
+              title="Agent 摘要已锁定"
+              description="解锁后可以看到今日判断、AI 结论和行动建议。"
+            />
+          ) : null}
+
+          {!showAgentGate && agentStatus === "loading" ? (
             <div className="news-agent-skeleton">
               <p className="muted">{agentProgress}</p>
               <p className="muted">Agent 正在整理今日重点，请稍候...</p>
@@ -183,9 +192,9 @@ export function NewsPageClient() {
             </div>
           ) : null}
 
-          {agentStatus === "error" ? <p className="muted">Agent 摘要加载失败：{agentError}</p> : null}
+          {!showAgentGate && agentStatus === "error" ? <p className="muted">Agent 摘要加载失败：{agentError}</p> : null}
 
-          {agentStatus === "ok" && agentResponse ? (
+          {!showAgentGate && agentStatus === "ok" && agentResponse ? (
             <>
               <div className="summary-overview-card">
                 <div className="summary-overview-topline">

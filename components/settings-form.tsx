@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { DemoAccessGate } from "@/components/demo-access-gate";
+import { useDemoAccess } from "@/components/demo-access-provider";
 import { getUserSettings, updateUserSettings } from "@/lib/api";
 import type { UserSettingsResponse } from "@/lib/types";
 
 const CUSTOM_MODEL_VALUE = "__custom__";
 
 export function SettingsForm() {
+  const { loaded, unlocked } = useDemoAccess();
   const [settings, setSettings] = useState<UserSettingsResponse | null>(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [customModel, setCustomModel] = useState("");
@@ -21,6 +24,9 @@ export function SettingsForm() {
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
+    if (loaded && !unlocked) {
+      return;
+    }
     let cancelled = false;
     setIsLoading(true);
     getUserSettings()
@@ -45,7 +51,7 @@ export function SettingsForm() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loaded, unlocked]);
 
   function syncDraft(payload: UserSettingsResponse) {
     const hasPreset = payload.model_options.some((option) => option.value === payload.llm_model);
@@ -107,6 +113,17 @@ export function SettingsForm() {
           setError(err instanceof Error ? err.message : "保存失败");
         });
     });
+  }
+
+  if (loaded && !unlocked) {
+    return (
+      <section className="panel section">
+        <DemoAccessGate
+          title="设置已锁定"
+          description="解锁后可以修改模型、LLM Base URL 和 API Key。"
+        />
+      </section>
+    );
   }
 
   if (isLoading) {

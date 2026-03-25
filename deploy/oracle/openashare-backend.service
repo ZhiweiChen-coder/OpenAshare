@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenAshare FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+# Ubuntu images (e.g. Ubuntu 24.04 on Oracle Cloud): ubuntu
+# Oracle Linux images: change to User=opc Group=opc
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openashare/backend
+EnvironmentFile=/opt/openashare/backend/.env
+ExecStart=/opt/openashare/backend/scripts/run_api_prod.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Keep logs in journald unless you explicitly redirect elsewhere.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

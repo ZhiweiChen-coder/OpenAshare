@@ -3,10 +3,12 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 
-import { streamAgentQuery } from "@/lib/api";
+import { DemoAccessGate } from "@/components/demo-access-gate";
+import { useDemoAccess } from "@/components/demo-access-provider";
+import { StockPanelLink } from "@/components/stock-panel-link";
+import { queryAgent } from "@/lib/api";
 import {
   AgentHistoryTurn,
-  AgentProgressEvent,
   AgentResponse,
   GlobalNewsItem,
   HotspotItem,
@@ -66,6 +68,7 @@ function createSession(title = "新对话"): ChatSession {
 }
 
 export function AgentChat({ compact = false }: AgentChatProps) {
+  const { loaded, unlocked } = useDemoAccess();
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession()]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -179,6 +182,18 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     }
   }, [busy]);
 
+  if (loaded && !unlocked) {
+    return (
+      <div className={compact ? "stack" : "panel section"}>
+        <DemoAccessGate
+          title="Agent 聊天已锁定"
+          description="解锁后可以使用统一问答、个股问答、持仓问答和消息追踪。"
+          compact={compact}
+        />
+      </div>
+    );
+  }
+
   function patchCurrentSession(updater: (session: ChatSession) => ChatSession) {
     setSessions((prev) =>
       prev.map((session) => {
@@ -240,50 +255,16 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     startTransition(async () => {
       try {
         setStreamState("connecting");
-        await streamAgentQuery(trimmed, history, currentSession?.id ?? undefined, {
-          onStart: (event: AgentProgressEvent) => {
-            setStreamState("streaming");
-            setCurrentStageLabel(event.message || "已建立连接");
-            setProgressPct(event.progress_pct ?? 0);
-            setActiveTool(typeof event.meta?.tool === "string" ? event.meta.tool : null);
-          },
-          onProgress: (event: AgentProgressEvent) => {
-            setStreamState("streaming");
-            setCurrentStageLabel(event.message || "处理中");
-            setProgressPct(event.progress_pct ?? 0);
-            setActiveTool(typeof event.meta?.tool === "string" ? event.meta.tool : null);
-          },
-          onResult: (event: AgentProgressEvent) => {
-            if (event.payload) {
-              appendAgentResponse(event.payload);
-            } else {
-              // Payload missing — show event message as a fallback so the user gets some response
-              appendMessage({
-                id: createId("msg"),
-                role: "agent",
-                content: event.message || "回答已生成，但内容为空。",
-              });
-            }
-            setCurrentStageLabel(event.message || "回答已生成");
-            setProgressPct(event.progress_pct ?? 100);
-          },
-          onError: (event: AgentProgressEvent) => {
-            encounteredError = true;
-            setStreamState("error");
-            appendMessage({
-              id: createId("msg"),
-              role: "agent",
-              content: event.message || "请求失败",
-            });
-          },
-          onDone: () => {
-            if (!encounteredError) {
-              setStreamState("completed");
-            }
-            setPendingQuery("");
-          },
-        });
+        setCurrentStageLabel("正在请求分析结果");
+        setProgressPct(28);
+        const response = await queryAgent(trimmed, history, currentSession?.id ?? undefined);
+        appendAgentResponse(response);
+        setCurrentStageLabel("回答已生成");
+        setProgressPct(100);
+        setStreamState("completed");
+        setPendingQuery("");
       } catch (error) {
+        encounteredError = true;
         setPendingQuery("");
         setStreamState("error");
         appendMessage({
@@ -913,15 +894,12 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
         >
           打开总览
         </Link>
-        <Link href={`/stocks?query=${encodeURIComponent(analysis.stock_code)}&panel=ai#ai`} className="button ghost">
+        <StockPanelLink stockCode={analysis.stock_code} panel="ai" className="button ghost">
           打开 AI 分析
-        </Link>
-        <Link
-          href={`/stocks?query=${encodeURIComponent(analysis.stock_code)}&panel=news#news`}
-          className="button ghost"
-        >
+        </StockPanelLink>
+        <StockPanelLink stockCode={analysis.stock_code} panel="news" className="button ghost">
           打开相关新闻
-        </Link>
+        </StockPanelLink>
         <Link href={portfolioHref} className="button">
           加入持仓
         </Link>
@@ -989,9 +967,9 @@ function NewsCards({ news }: { news: NewsItem[] }) {
               <span className="tag">{item.sentiment}</span>
             </div>
             <div className="inline-actions" style={{ marginTop: 10 }}>
-              <Link href={`/stocks?query=${encodeURIComponent(item.stock_code)}&panel=news#news`} className="button ghost">
+              <StockPanelLink stockCode={item.stock_code} panel="news" className="button ghost">
                 查看该股消息
-              </Link>
+              </StockPanelLink>
             </div>
           </div>
         ))}

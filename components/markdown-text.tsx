@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 
 export function MarkdownText({ content }: { content: string }) {
-  const blocks = content.split(/\n{2,}/).filter(Boolean);
+  const normalizedContent = normalizeMarkdownContent(content);
+  const blocks = normalizedContent.split(/\n{2,}/).filter(Boolean);
   return (
     <div className="markdown-body">
       {blocks.map((block, index) => {
@@ -31,9 +32,9 @@ export function MarkdownText({ content }: { content: string }) {
         const lines = trimmed.split("\n");
         if (lines.every((line) => /^[-*]\s+/.test(line))) {
           return (
-            <ul key={`${index}-${trimmed.slice(0, 12)}`}>
+            <ul className="markdown-rich-list" key={`${index}-${trimmed.slice(0, 12)}`}>
               {lines.map((line, lineIndex) => (
-                <li key={`${lineIndex}-${line}`}>{renderInlineMarkdown(line.replace(/^[-*]\s+/, ""))}</li>
+                <li key={`${lineIndex}-${line}`}>{renderListItem(line.replace(/^[-*]\s+/, ""))}</li>
               ))}
             </ul>
           );
@@ -51,6 +52,15 @@ export function MarkdownText({ content }: { content: string }) {
       })}
     </div>
   );
+}
+
+function normalizeMarkdownContent(content: string) {
+  return content
+    .replace(/\r\n/g, "\n")
+    .replace(/([：:])\s*([*-])\s*/g, "$1\n$2 ")
+    .replace(/([^\n])\s([*-])\s+(?=[^\s])/g, "$1\n$2 ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function renderInlineMarkdown(text: string): ReactNode[] {
@@ -74,3 +84,16 @@ function renderInlineMarkdown(text: string): ReactNode[] {
   });
 }
 
+function renderListItem(text: string): ReactNode {
+  const cleaned = text.trim();
+  const labelMatch = cleaned.match(/^([^：:]{2,24}[：:])\s*(.+)$/);
+  if (!labelMatch) {
+    return renderInlineMarkdown(cleaned);
+  }
+  return (
+    <>
+      <strong>{labelMatch[1]}</strong>
+      <span> {renderInlineMarkdown(labelMatch[2])}</span>
+    </>
+  );
+}

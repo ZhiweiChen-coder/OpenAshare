@@ -1,0 +1,24 @@
+[Unit]
+Description=OpenAshare Next.js frontend (legacy reference only)
+After=network.target
+
+[Service]
+# This unit is not part of the recommended Oracle deployment path.
+# Oracle should run backend-only; frontend belongs on Vercel.
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openashare/backend
+EnvironmentFile=/opt/openashare/backend/.env
+Environment=WEB_HOSTNAME=127.0.0.1
+Environment=WEB_PORT=3000
+ExecStart=/opt/openashare/backend/scripts/run_web_prod.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

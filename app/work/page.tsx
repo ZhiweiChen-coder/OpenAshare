@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
+
 import { DemoAccessGate } from "@/components/demo-access-gate";
 import { SearchForm } from "@/components/search-form";
 import { getHotspots, getPortfolioAnalysis } from "@/lib/api";
 import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
 import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
 
-export default async function DashboardPage() {
+export default async function WorkPage() {
   const cookieStore = await cookies();
   const cookieHeader = cookieStore
     .getAll()
@@ -25,7 +26,7 @@ export default async function DashboardPage() {
       <section className="hero">
         <div className="panel hero-copy">
           <span className="eyebrow">AI Agent + AkShare + 技术指标</span>
-          <h1>工作台 · 一站式 A 股智能盘面</h1>
+          <h1>OpenAshare · 一站式 A 股智能盘面</h1>
           <p>用一个界面串起技术分析、消息、热点和持仓，少切页面，多做决策。</p>
           <SearchForm />
           <div className="hero-grid">

@@ -12,11 +12,16 @@ export async function POST(request: Request) {
   const body = await request.text();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+  const headers = new Headers(request.headers);
+  headers.set("Content-Type", "application/json");
+  headers.set("Accept", "text/event-stream");
+  headers.delete("host");
+  headers.delete("content-length");
 
   try {
     const res = await fetch(backendUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      headers,
       body,
       cache: "no-store",
       signal: controller.signal,

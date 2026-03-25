@@ -62,6 +62,17 @@ class StockAnalysisResponse(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AnalysisProgressResponse(BaseModel):
+    request_id: str
+    status: Literal["pending", "completed", "error", "unknown"] = "unknown"
+    stage: str = "unknown"
+    progress_pct: int = 0
+    message: str = ""
+    stock_code: Optional[str] = None
+    include_ai: bool = False
+    updated_at: Optional[datetime] = None
+
+
 class NewsItem(BaseModel):
     id: str
     stock_code: str

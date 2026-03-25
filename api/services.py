@@ -4,6 +4,7 @@ import copy
 import sqlite3
 import time
 import re
+from threading import Lock
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from api.schemas import (
+    AnalysisProgressResponse,
     AIInsight,
     AgentResponse,
     AgentHistoryTurn,
@@ -230,20 +232,91 @@ class TTLCacheStore:
         self._entries.clear()
 
 
+class AnalysisProgressStore:
+    def __init__(self, ttl_seconds: int = 900):
+        self.ttl_seconds = ttl_seconds
+        self._entries: Dict[str, Tuple[float, AnalysisProgressResponse]] = {}
+        self._lock = Lock()
+
+    def _cleanup_locked(self) -> None:
+        now = time.time()
+        expired = [key for key, (expires_at, _) in self._entries.items() if expires_at <= now]
+        for key in expired:
+            self._entries.pop(key, None)
+
+    def update(
+        self,
+        request_id: Optional[str],
+        *,
+        status: str,
+        stage: str,
+        progress_pct: int,
+        message: str,
+        stock_code: Optional[str] = None,
+        include_ai: bool = False,
+    ) -> None:
+        if not request_id:
+            return
+        payload = AnalysisProgressResponse(
+            request_id=request_id,
+            status=status,  # type: ignore[arg-type]
+            stage=stage,
+            progress_pct=max(0, min(int(progress_pct), 100)),
+            message=message,
+            stock_code=stock_code,
+            include_ai=include_ai,
+            updated_at=_now_utc(),
+        )
+        with self._lock:
+            self._cleanup_locked()
+            self._entries[request_id] = (time.time() + self.ttl_seconds, payload)
+
+    def get(self, request_id: str) -> AnalysisProgressResponse:
+        with self._lock:
+            self._cleanup_locked()
+            entry = self._entries.get(request_id)
+            if not entry:
+                return AnalysisProgressResponse(
+                    request_id=request_id,
+                    status="unknown",
+                    stage="unknown",
+                    progress_pct=0,
+                    message="等待后端开始处理分析请求",
+                    updated_at=_now_utc(),
+                )
+            _, payload = entry
+            return payload.model_copy(deep=True)
+
+
 class StockAnalysisService:
     def __init__(self, config: Optional[Config] = None, settings_store: Optional[UserSettingsStore] = None):
         self.config = config or Config()
         self.settings_store = settings_store
         self.signal_analyzer = SignalAnalyzer()
         self._response_cache = TTLCacheStore()
+        self.progress_store = AnalysisProgressStore()
 
     def _runtime_config(self) -> Config:
         if self.settings_store is None:
             return self.config
         return self.settings_store.build_runtime_config(self.config)
 
-    def search_stocks(self, query: str, max_results: int = 10) -> List[StockSearchResult]:
+    def search_stocks(self, query: str, max_results: int = 10, request_id: Optional[str] = None) -> List[StockSearchResult]:
+        self.progress_store.update(
+            request_id,
+            status="pending",
+            stage="searching",
+            progress_pct=8,
+            message="正在识别股票代码、名称和所属市场",
+        )
         results = stock_searcher.search_stocks(query, max_results=max_results)
+        self.progress_store.update(
+            request_id,
+            status="pending",
+            stage="search_done",
+            progress_pct=18,
+            message=f"已完成标的识别，匹配到 {len(results)} 个候选结果",
+        )
         return [StockSearchResult(**item) for item in results]
 
     def build_analysis_bundle(
@@ -251,6 +324,7 @@ class StockAnalysisService:
         stock_code: str,
         include_ai: bool = True,
         progress_callback: Optional[ProgressCallback] = None,
+        request_id: Optional[str] = None,
     ) -> AnalyzerBundle:
         normalized = normalize_stock_code(stock_code)
         if progress_callback:
@@ -266,10 +340,28 @@ class StockAnalysisService:
         )
         if progress_callback:
             progress_callback("fetch_data", 25, "正在拉取行情数据", {"stock_code": normalized})
+        self.progress_store.update(
+            request_id,
+            status="pending",
+            stage="fetch_data",
+            progress_pct=30,
+            message=f"已锁定 {stock_name}，正在拉取行情数据",
+            stock_code=normalized,
+            include_ai=include_ai,
+        )
         if not analyzer.fetch_data():
             raise ValueError(f"Unable to fetch stock data for {normalized}")
         if progress_callback:
             progress_callback("fetch_data", 35, "行情数据已加载完成", {"stock_code": normalized})
+        self.progress_store.update(
+            request_id,
+            status="pending",
+            stage="calculate_indicators",
+            progress_pct=44,
+            message="行情数据已返回，正在计算技术指标",
+            stock_code=normalized,
+            include_ai=include_ai,
+        )
         if not analyzer.calculate_indicators():
             raise ValueError(f"Unable to calculate indicators for {normalized}")
         if progress_callback:
@@ -280,6 +372,15 @@ class StockAnalysisService:
         signals = self.signal_analyzer.analyze_all_signals(dataframe)
         if progress_callback:
             progress_callback("build_analysis", 65, "技术分析结果已整理完成", {"stock_code": normalized})
+        self.progress_store.update(
+            request_id,
+            status="pending",
+            stage="summarize",
+            progress_pct=62,
+            message="技术指标计算完成，正在整理交易信号与结论",
+            stock_code=normalized,
+            include_ai=include_ai,
+        )
         ai_text: Optional[str] = None
         if include_ai and analyzer.llm and progress_callback:
             progress_callback("generate_ai_report", 85, "正在生成 AI 分析报告", {"stock_code": normalized})
@@ -300,7 +401,19 @@ class StockAnalysisService:
             )
             analyzer.llm = None
         if include_ai and analyzer.llm:
-            ai_text = analyzer.generate_single_stock_analysis(stock_name, analysis, "深度分析")
+
+            def report_ai_progress(progress: int, message: str) -> None:
+                self.progress_store.update(
+                    request_id,
+                    status="pending",
+                    stage="ai_analysis",
+                    progress_pct=progress,
+                    message=message,
+                    stock_code=normalized,
+                    include_ai=True,
+                )
+
+            ai_text = analyzer.generate_single_stock_analysis(stock_name, analysis, "深度分析", progress_callback=report_ai_progress)
         return AnalyzerBundle(
             analyzer=analyzer,
             analysis=analysis,
@@ -309,11 +422,14 @@ class StockAnalysisService:
             ai_text=ai_text,
         )
 
+    def get_analysis_progress(self, request_id: str) -> AnalysisProgressResponse:
+        return self.progress_store.get(request_id)
     def get_stock_analysis(
         self,
         stock_code: str,
         include_ai: bool = True,
         progress_callback: Optional[ProgressCallback] = None,
+        request_id: Optional[str] = None,
     ) -> StockAnalysisResponse:
         normalized = normalize_stock_code(stock_code)
         runtime_config = self._runtime_config()
@@ -324,9 +440,23 @@ class StockAnalysisService:
         if cached is not None:
             if progress_callback:
                 progress_callback("completed", 100, "命中缓存，分析结果已就绪", {"stock_code": normalized, "cached": True})
+            self.progress_store.update(
+                request_id,
+                status="completed",
+                stage="cached",
+                progress_pct=100,
+                message="命中缓存，分析结果已直接返回",
+                stock_code=normalized,
+                include_ai=include_ai,
+            )
             return cached
 
-        bundle = self.build_analysis_bundle(normalized, include_ai=include_ai, progress_callback=progress_callback)
+        bundle = self.build_analysis_bundle(
+            normalized,
+            include_ai=include_ai,
+            progress_callback=progress_callback,
+            request_id=request_id,
+        )
         basic_data = bundle.analysis.get("基础数据", {})
         latest = bundle.dataframe.iloc[-1]
         # K 线图默认展示最近约 5 年日 K（~250 交易日 * 5），方便观察中长期趋势
@@ -401,6 +531,15 @@ class StockAnalysisService:
                 "generated_at": quote.timestamp.isoformat(),
             },
         )
+        self.progress_store.update(
+            request_id,
+            status="completed",
+            stage="completed",
+            progress_pct=100,
+            message="分析结果已完成，正在渲染页面",
+            stock_code=normalized,
+            include_ai=include_ai,
+        )
         self._response_cache.set(cache_key, response, ttl)
         if progress_callback:
             progress_callback("completed", 100, "分析结果已生成", {"stock_code": normalized})
@@ -428,14 +567,20 @@ class NewsService:
             for item in self.state_store.get_recent_alerts(limit=limit * 5)
             if item["stock_code"] == normalized and item["event_type"] == "news"
         ]
-        news_items = [self._map_alert_to_news(item) for item in stored_items[:limit]]
+        news_items = self._prioritize_stock_news(
+            [self._map_alert_to_news(item) for item in stored_items],
+            limit=limit,
+        )
 
         if news_items:
             self._response_cache.set(cache_key, news_items, 120)
             return news_items
 
         fetched = self.tracker.fetch_stock_news(normalized, resolved_name)
-        result = [self._map_fetched_news(normalized, resolved_name, item) for item in fetched[:limit]]
+        result = self._prioritize_stock_news(
+            [self._map_fetched_news(normalized, resolved_name, item) for item in fetched],
+            limit=limit,
+        )
         self._response_cache.set(cache_key, result, 120)
         return result
 
@@ -541,6 +686,19 @@ class NewsService:
             url=item.get("url"),
             raw_payload=raw,
         )
+
+    def _prioritize_stock_news(self, items: List[NewsItem], limit: int) -> List[NewsItem]:
+        if not items:
+            return []
+
+        direct_items = [item for item in items if item.relation_type == "direct"]
+        if len(direct_items) >= limit:
+            return direct_items[:limit]
+
+        # Only use topic-level items as sparse fallback when direct mentions are insufficient.
+        topic_items = [item for item in items if item.relation_type != "direct"]
+        fallback_limit = min(max(limit - len(direct_items), 0), 3)
+        return [*direct_items, *topic_items[:fallback_limit]][:limit]
 
     def _normalize_global_news_dataframe(self, data_frame: Optional[pd.DataFrame], source_name: str) -> List[Dict[str, Any]]:
         if data_frame is None or data_frame.empty:
@@ -2235,4 +2393,3 @@ class AgentService:
                     "code": normalize_stock_code(stock_code),
                 }
         return None
-

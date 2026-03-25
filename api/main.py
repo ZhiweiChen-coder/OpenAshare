@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
 import hashlib
+import base64
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -24,6 +26,7 @@ from api.agent_pydantic import (
     run_agent_async,
 )
 from api.schemas import (
+    AnalysisProgressResponse,
     AgentProgressEvent,
     AgentHistoryTurn,
     AgentQuery,
@@ -53,6 +56,63 @@ hotspot_service = HotspotService(news_service=news_service)
 portfolio_service = PortfolioService()
 web_search_service = WebSearchService()
 agent_service = AgentService(stock_service, news_service, hotspot_service, portfolio_service, web_search_service)
+
+DEMO_ACCESS_COOKIE_NAME = "ashare_demo_access"
+DEMO_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+
+
+def _get_demo_access_code() -> str:
+    return os.getenv("DEMO_ACCESS_CODE", "").strip()
+
+
+def _get_demo_access_secret() -> str:
+    return os.getenv("DEMO_ACCESS_SECRET", "").strip() or _get_demo_access_code()
+
+
+def _demo_access_enabled() -> bool:
+    return bool(_get_demo_access_code() and _get_demo_access_secret())
+
+
+def _demo_access_signature(issued_at: int, secret: str | None = None) -> str:
+    secret_value = secret or _get_demo_access_secret()
+    digest = hmac.new(secret_value.encode("utf-8"), str(issued_at).encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def _build_demo_access_token(now: datetime | None = None) -> tuple[str, datetime]:
+    issued_at = int((now or datetime.now(timezone.utc)).timestamp())
+    expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
+    return f"{issued_at}.{_demo_access_signature(issued_at)}", expires_at
+
+
+def _demo_access_status_from_token(token: Optional[str]) -> dict[str, Any]:
+    if not _demo_access_enabled():
+        return {"enabled": False, "unlocked": True, "expires_at": None}
+    if not token:
+        return {"enabled": True, "unlocked": False, "expires_at": None}
+    try:
+        issued_at_raw, signature = token.split(".", 1)
+        issued_at = int(issued_at_raw)
+    except (ValueError, TypeError):
+        return {"enabled": True, "unlocked": False, "expires_at": None}
+    expected = _demo_access_signature(issued_at)
+    if not hmac.compare_digest(expected, signature):
+        return {"enabled": True, "unlocked": False, "expires_at": None}
+    now_seconds = int(datetime.now(timezone.utc).timestamp())
+    if issued_at + DEMO_ACCESS_MAX_AGE_SECONDS < now_seconds:
+        expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
+        return {"enabled": True, "unlocked": False, "expires_at": expires_at.isoformat()}
+    expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
+    return {"enabled": True, "unlocked": True, "expires_at": expires_at.isoformat()}
+
+
+def _require_demo_access(request: Request, feature_name: str) -> None:
+    if not _demo_access_enabled():
+        return
+    token = request.cookies.get(DEMO_ACCESS_COOKIE_NAME)
+    if _demo_access_status_from_token(token).get("unlocked"):
+        return
+    raise HTTPException(status_code=403, detail=f"{feature_name}需要先解锁演示访问。")
 
 
 def _build_etag(payload: Any) -> str:
@@ -180,7 +240,10 @@ def _warm_read_caches() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    _warm_read_caches()
+    try:
+        asyncio.create_task(asyncio.to_thread(_warm_read_caches))
+    except Exception:
+        logger.exception("Failed to schedule cache warmup")
     yield
 
 
@@ -544,13 +607,20 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
+
+
 @app.get("/api/settings", response_model=UserSettingsResponse)
-def get_user_settings() -> UserSettingsResponse:
+def get_user_settings(request: Request) -> UserSettingsResponse:
+    _require_demo_access(request, "设置")
     return settings_store.get_settings()
 
 
 @app.put("/api/settings", response_model=UserSettingsResponse)
-def update_user_settings(payload: UserSettingsUpdate) -> UserSettingsResponse:
+def update_user_settings(request: Request, payload: UserSettingsUpdate) -> UserSettingsResponse:
+    _require_demo_access(request, "设置")
     global _pydantic_agent, _agent_deps, _pydantic_agent_signature
     updated = settings_store.update_settings(
         llm_model=payload.llm_model,
@@ -566,9 +636,29 @@ def update_user_settings(payload: UserSettingsUpdate) -> UserSettingsResponse:
 
 
 @app.get("/api/stocks/search", response_model=List[StockSearchResult])
-def search_stocks(request: Request, q: str = Query(..., min_length=1), limit: int = Query(10, ge=1, le=20)) -> Response:
-    payload = stock_service.search_stocks(q, max_results=limit)
-    return _cached_json_response(request, payload, max_age=300, stale_while_revalidate=600)
+def search_stocks(
+    request: Request,
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=20),
+    request_id: Optional[str] = Query(None),
+) -> Response:
+    try:
+        if request_id:
+            payload = stock_service.search_stocks(q, max_results=limit, request_id=request_id)
+        else:
+            payload = stock_service.search_stocks(q, max_results=limit)
+        return _cached_json_response(request, payload, max_age=300, stale_while_revalidate=600)
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
+        stock_service.progress_store.update(
+            request_id,
+            status="error",
+            stage="search_error",
+            progress_pct=100,
+            message=f"标的识别失败：{exc}",
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/stocks/{stock_code}/analysis", response_model=StockAnalysisResponse)
@@ -576,19 +666,38 @@ def get_stock_analysis(
     request: Request,
     stock_code: str,
     include_ai: bool = Query(True, description="是否生成 AI 文本分析，默认开启"),
+    request_id: Optional[str] = Query(None, description="用于跟踪单次分析进度的请求 ID"),
 ) -> Response:
     try:
-        payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai)
+        if include_ai:
+            _require_demo_access(request, "AI 分析")
+        if request_id:
+            payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai, request_id=request_id)
+        else:
+            payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai)
         return _cached_json_response(request, payload, max_age=120, stale_while_revalidate=240)
+    except HTTPException:
+        raise
     except Exception as exc:
+        stock_service.progress_store.update(
+            request_id,
+            status="error",
+            stage="analysis_error",
+            progress_pct=100,
+            message=f"单股分析失败：{exc}",
+            stock_code=stock_code,
+            include_ai=include_ai,
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 @app.get("/api/stocks/{stock_code}/analysis/stream")
 async def stream_stock_analysis(
+    request: Request,
     stock_code: str,
     include_ai: bool = Query(True, description="是否生成 AI 文本分析，默认开启"),
 ):
+    if include_ai:
+        _require_demo_access(request, "AI 分析")
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     normalized_code = stock_code.strip()
@@ -659,6 +768,10 @@ async def stream_stock_analysis(
     asyncio.create_task(runner())
     return sse_response(queue)
 
+@app.get("/api/stocks/progress/{request_id}", response_model=AnalysisProgressResponse)
+def get_stock_analysis_progress(request_id: str) -> AnalysisProgressResponse:
+    return stock_service.get_analysis_progress(request_id)
+
 
 @app.get("/api/stocks/{stock_code}/news", response_model=List[NewsItem])
 def get_stock_news(request: Request, stock_code: str, limit: int = Query(20, ge=1, le=50)) -> Response:
@@ -705,28 +818,33 @@ def get_hotspot_detail(request: Request, topic_name: str) -> Response:
 
 
 @app.get("/api/portfolio", response_model=List[PortfolioPosition])
-def list_portfolio_positions() -> List[PortfolioPosition]:
+def list_portfolio_positions(request: Request) -> List[PortfolioPosition]:
+    _require_demo_access(request, "持仓管理")
     return portfolio_service.list_positions()
 
 
 @app.post("/api/portfolio/positions", response_model=PortfolioPosition, status_code=201)
-def create_portfolio_position(position: PortfolioPosition) -> PortfolioPosition:
+def create_portfolio_position(request: Request, position: PortfolioPosition) -> PortfolioPosition:
+    _require_demo_access(request, "持仓管理")
     return portfolio_service.create_position(position)
 
 
 @app.put("/api/portfolio/positions/{position_id}", response_model=PortfolioPosition)
-def update_portfolio_position(position_id: int, position: PortfolioPosition) -> PortfolioPosition:
+def update_portfolio_position(request: Request, position_id: int, position: PortfolioPosition) -> PortfolioPosition:
+    _require_demo_access(request, "持仓管理")
     return portfolio_service.update_position(position_id, position)
 
 
 @app.delete("/api/portfolio/positions/{position_id}", status_code=204)
-def delete_portfolio_position(position_id: int) -> Response:
+def delete_portfolio_position(request: Request, position_id: int) -> Response:
+    _require_demo_access(request, "持仓管理")
     portfolio_service.delete_position(position_id)
     return Response(status_code=204)
 
 
 @app.get("/api/portfolio/analysis", response_model=PortfolioAnalysisResponse)
-def analyze_portfolio() -> PortfolioAnalysisResponse:
+def analyze_portfolio(request: Request) -> PortfolioAnalysisResponse:
+    _require_demo_access(request, "持仓分析")
     return portfolio_service.analyze_portfolio()
 
 
@@ -1129,12 +1247,19 @@ async def _run_agent_request(
         if progress_callback:
             progress_callback("select_engine", 25, "已选择智能引擎，准备执行工具调用", {"engine": "pydantic_ai"})
         try:
-            return await run_agent_async(
-                agent,
-                deps,
-                _build_enriched_agent_query(payload.query, merged_history, memory_profile),
-                progress_callback=progress_callback,
-            )
+            enriched_query = _build_enriched_agent_query(payload.query, merged_history, memory_profile)
+            if progress_callback is not None:
+                try:
+                    return await run_agent_async(
+                        agent,
+                        deps,
+                        enriched_query,
+                        progress_callback=progress_callback,
+                    )
+                except TypeError as exc:
+                    if "progress_callback" not in str(exc):
+                        raise
+            return await run_agent_async(agent, deps, enriched_query)
         except BaseException as exc:
             if isinstance(exc, (SystemExit, KeyboardInterrupt)):
                 raise
@@ -1144,19 +1269,31 @@ async def _run_agent_request(
     elif progress_callback:
         progress_callback("select_engine", 25, "已选择规则分析引擎", {"engine": "deterministic"})
 
+    if progress_callback is not None:
+        try:
+            return await asyncio.to_thread(
+                agent_service.query,
+                payload.query,
+                merged_history,
+                memory_profile,
+                progress_callback,
+            )
+        except TypeError as exc:
+            if "positional argument" not in str(exc) and "given" not in str(exc):
+                raise
     return await asyncio.to_thread(
         agent_service.query,
         payload.query,
         merged_history,
         memory_profile,
-        progress_callback,
     )
 
 
 @app.post("/api/agent/query")
-async def agent_query(payload: AgentQuery) -> Response:
+async def agent_query(request: Request, payload: AgentQuery) -> Response:
     """Always return 200 + JSON. Never 500 - errors go in body."""
     try:
+        _require_demo_access(request, "Agent 聊天")
         merged_history = _merge_agent_history(payload)
         memory_profile = agent_memory_store.get_profile(payload.session_id or "")
         resp = await _run_agent_request(payload, merged_history, memory_profile)
@@ -1164,6 +1301,8 @@ async def agent_query(payload: AgentQuery) -> Response:
         heartbeat = _maybe_run_heartbeat(payload.session_id)
         resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
         return JSONResponse(content=_safe_agent_json(resp), status_code=200)
+    except HTTPException:
+        raise
     except BaseException as e:
         if isinstance(e, (SystemExit, KeyboardInterrupt)):
             raise
@@ -1180,7 +1319,8 @@ async def agent_query(payload: AgentQuery) -> Response:
 
 
 @app.post("/api/agent/query/stream")
-async def agent_query_stream(payload: AgentQuery) -> Response:
+async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
+    _require_demo_access(request, "Agent 聊天")
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
@@ -1255,5 +1395,3 @@ async def agent_query_stream(payload: AgentQuery) -> Response:
 
     asyncio.create_task(runner())
     return sse_response(queue)
-
-

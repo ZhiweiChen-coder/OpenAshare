@@ -1,155 +1,82 @@
-"use client";
-
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { cookies } from "next/headers";
 
 import { CandlestickChart } from "@/components/candlestick-chart";
 import { AICarousel } from "@/components/ai-carousel";
+import { DemoAccessGate } from "@/components/demo-access-gate";
 import { SearchForm } from "@/components/search-form";
-import { getStockNews, searchStocks, streamStockAnalysis } from "@/lib/api";
-import type { NewsItem, StockAnalysisProgressEvent, StockAnalysisResponse, StockSearchResult } from "@/lib/types";
+import { StockPanelLink } from "@/components/stock-panel-link";
+import { getStockAnalysis, getStockNews, searchStocksWithOptions } from "@/lib/api";
+import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
+import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
+import type { NewsItem, StockAnalysisResponse } from "@/lib/types";
 
-export default function StocksPage() {
-  const searchParams = useSearchParams();
-  const [query, setQuery] = useState("");
-  const [panel, setPanel] = useState("");
-  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
-  const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [analysisError, setAnalysisError] = useState("");
-  const [newsError, setNewsError] = useState("");
-  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
-  const [progressLabel, setProgressLabel] = useState("等待分析请求");
-  const [progressPct, setProgressPct] = useState(0);
+type PageProps = {
+  searchParams: Promise<{ query?: string; panel?: string; request_id?: string }>;
+};
 
-  useEffect(() => {
-    setQuery(searchParams.get("query") ?? "");
-    setPanel(searchParams.get("panel") ?? "");
-  }, [searchParams]);
+export default async function StocksPage({ searchParams }: PageProps) {
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore
+    .getAll()
+    .map((entry) => `${entry.name}=${entry.value}`)
+    .join("; ");
+  const demoAccess = getDemoAccessStatusFromToken(cookieStore.get(DEMO_ACCESS_COOKIE_NAME)?.value);
+  const { query = "", panel = "", request_id: requestId = "" } = await searchParams;
+  const activePanel = panel || "overview";
+  const shouldLoadAi = activePanel === "ai" && demoAccess.unlocked;
+  const shouldLoadNews = activePanel === "news";
+  const showAiGate = activePanel === "ai" && !demoAccess.unlocked;
+  const q = query.trim();
+  const qForSearch = /^[a-z]{2}\d+$/i.test(q) ? q.toLowerCase() : q;
+  let searchResults = qForSearch ? await searchStocksWithOptions(qForSearch, { requestId }).catch(() => []) : [];
 
-  useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setSearchResults([]);
-      setAnalysis(null);
-      setNews([]);
-      setAnalysisStatus("idle");
-      setAnalysisError("");
-      setNewsError("");
-      return;
+  if (!searchResults.length && qForSearch && /^[a-z]{2}\d{6}$/i.test(qForSearch)) {
+    const code = qForSearch.toLowerCase();
+    searchResults = [
+      {
+        name: `代码 ${code}`,
+        code,
+        market: code.startsWith("sh") ? "A股-上海" : "A股-深圳",
+        category: "",
+        score: 50,
+        match_type: "direct_code",
+      },
+    ];
+  }
+
+  const selected = searchResults[0];
+  let analysis: StockAnalysisResponse | null = null;
+  let news: NewsItem[] = [];
+  let analysisError = "";
+  let newsError = "";
+
+  if (selected) {
+    const [analysisResult, newsResult] = await Promise.allSettled([
+      getStockAnalysis(selected.code, { includeAi: shouldLoadAi, requestId, requestInit: { headers: { cookie: cookieHeader } } }),
+      shouldLoadNews ? getStockNews(selected.code) : Promise.resolve([]),
+    ]);
+
+    if (analysisResult.status === "fulfilled") {
+      analysis = analysisResult.value;
+    } else {
+      analysisError = analysisResult.reason instanceof Error ? analysisResult.reason.message : "单股分析生成失败";
     }
 
-    let cancelled = false;
-    setAnalysisStatus("loading");
-    setProgressLabel("正在识别股票目标");
-    setProgressPct(0);
-    setAnalysis(null);
-    setNews([]);
-    setAnalysisError("");
-    setNewsError("");
-
-    searchStocks(q)
-      .then((results) => {
-        if (cancelled) return;
-        let nextResults = results;
-        if (!nextResults.length && /^[a-z]{2}\d{6}$/i.test(q)) {
-          const code = q.toLowerCase();
-          nextResults = [
-            {
-              name: `代码 ${code}`,
-              code,
-              market: code.startsWith("sh") ? "A股-上海" : "A股-深圳",
-              category: "",
-              score: 50,
-              match_type: "direct_code",
-            },
-          ];
-        }
-        setSearchResults(nextResults);
-        const selected = nextResults[0];
-        if (!selected) {
-          setAnalysisStatus("error");
-          setAnalysisError("未找到匹配股票。");
-          return;
-        }
-
-        const controller = new AbortController();
-        streamStockAnalysis(
-          selected.code,
-          { includeAi: true, signal: controller.signal },
-          {
-            onStart: (event: StockAnalysisProgressEvent) => {
-              if (cancelled) return;
-              setProgressLabel(event.message || "已接收分析请求");
-              setProgressPct(event.progress_pct ?? 0);
-            },
-            onProgress: (event: StockAnalysisProgressEvent) => {
-              if (cancelled) return;
-              setProgressLabel(event.message || "正在分析");
-              setProgressPct(event.progress_pct ?? 0);
-            },
-            onResult: (event: StockAnalysisProgressEvent) => {
-              if (cancelled || !event.payload) return;
-              setAnalysis(event.payload);
-              setAnalysisStatus("ok");
-              setProgressLabel(event.message || "分析结果已生成");
-              setProgressPct(event.progress_pct ?? 100);
-            },
-            onError: (event: StockAnalysisProgressEvent) => {
-              if (cancelled) return;
-              setAnalysisStatus("error");
-              setAnalysisError(event.message || "单股分析生成失败");
-            },
-          },
-        ).catch((error) => {
-          if (cancelled) return;
-          setAnalysisStatus("error");
-          setAnalysisError(error instanceof Error ? error.message : "单股分析生成失败");
-        });
-
-        getStockNews(selected.code)
-          .then((items) => {
-            if (!cancelled) setNews(items);
-          })
-          .catch((error) => {
-            if (!cancelled) {
-              setNewsError(error instanceof Error ? error.message : "相关新闻加载失败");
-            }
-          });
-
-        return () => controller.abort();
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        setAnalysisStatus("error");
-        setAnalysisError(error instanceof Error ? error.message : "股票搜索失败");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [query]);
-
-  const selected = searchResults[0] ?? null;
-  const showProgress = analysisStatus === "loading";
-  const indicatorEntries = useMemo(() => Object.entries(analysis?.technical_indicators ?? {}), [analysis]);
+    if (newsResult.status === "fulfilled") {
+      news = newsResult.value;
+    } else {
+      newsError = newsResult.reason instanceof Error ? newsResult.reason.message : "相关新闻加载失败";
+    }
+  }
 
   return (
     <>
       <section className="panel section">
         <h1>单股分析</h1>
-        <p className="muted">围绕一只股票集中展示技术指标、AI 观点和相关新闻，帮助你快速判断是否值得出手或继续持有。</p>
+        <p className="muted">围绕一只股票集中展示技术指标、AI 观点和相关新闻，帮你快速判断是否值得出手或继续持有。</p>
         <SearchForm initialValue={query} />
       </section>
-
-      {showProgress ? (
-        <section className="panel section news-warning-strip">
-          <h2>分析进度</h2>
-          <p className="muted">{progressLabel}</p>
-          <p className="muted">当前进度 {progressPct}%</p>
-        </section>
-      ) : null}
 
       <section className="content-grid">
         <div className="panel section">
@@ -202,19 +129,21 @@ export default function StocksPage() {
         </div>
       </section>
 
-      {selected && analysisStatus === "error" ? (
+      {selected && !analysis ? (
         <section className="panel section news-warning-strip">
           <h2>分析状态</h2>
           <p className="muted">
             {selected.name} ({selected.code}) 的单股分析暂时没有成功返回。
           </p>
-          <p className="muted">{analysisError || "后端正在处理或分析服务暂时不可用。"}</p>
+          <p className="muted">
+            {analysisError || "后端正在处理或分析服务暂时不可用。请检查 API、模型网络连接和日志后重试。"}
+          </p>
         </section>
       ) : null}
 
       {analysis ? (
         <>
-          <section className={`panel section ${panel === "overview" ? "focus-panel" : ""}`} id="overview">
+          <section className={`panel section ${activePanel === "overview" ? "focus-panel" : ""}`} id="overview">
             <div className="metric-grid">
               <div className="card">
                 <div className="muted">最新价</div>
@@ -247,10 +176,10 @@ export default function StocksPage() {
             <div className={`panel section ${panel === "indicators" ? "focus-panel" : ""}`} id="indicators">
               <h2>指标快照</h2>
               <div className="metric-grid">
-                {indicatorEntries.map(([key, value]) => (
+                {Object.entries(analysis.technical_indicators).map(([key, value]) => (
                   <div className="card" key={key}>
                     <div className="muted">{key}</div>
-                    <strong>{value == null ? "-" : Number(value).toFixed(2)}</strong>
+                    <strong>{value === null ? "-" : value.toFixed(2)}</strong>
                   </div>
                 ))}
               </div>
@@ -269,21 +198,35 @@ export default function StocksPage() {
               </div>
             </div>
 
-            <div className={`panel section ${panel === "ai" ? "focus-panel" : ""}`} id="ai">
+            <div className={`panel section ${activePanel === "ai" ? "focus-panel" : ""}`} id="ai">
               <h2>AI 分析</h2>
-              {analysis.ai_insight.enabled ? (
+              {showAiGate ? (
+                <DemoAccessGate
+                  title="AI 分析已锁定"
+                  description="解锁后可以查看更长的 AI 观点、结论和操作建议。"
+                />
+              ) : shouldLoadAi && analysis.ai_insight.enabled ? (
                 <AICarousel content={analysis.ai_insight.content || analysis.ai_insight.error || ""} />
-              ) : (
+              ) : shouldLoadAi ? (
                 <p className="muted">当前未配置 LLM API，已保留纯技术分析链路。</p>
+              ) : (
+                <div className="card">
+                  <StockPanelLink stockCode={selected.code} panel="ai">打开 AI 分析</StockPanelLink>
+                </div>
               )}
             </div>
           </section>
 
-          <section className={`panel section ${panel === "news" ? "focus-panel" : ""}`} id="news">
+          <section className={`panel section ${activePanel === "news" ? "focus-panel" : ""}`} id="news">
             <h2>相关新闻</h2>
-            {newsError ? <p className="muted">新闻加载部分失败：{newsError}</p> : null}
+            {!shouldLoadNews ? (
+                <div className="card">
+                <StockPanelLink stockCode={selected.code} panel="news">打开相关新闻</StockPanelLink>
+                </div>
+            ) : null}
+            {shouldLoadNews && newsError ? <p className="muted">新闻加载部分失败：{newsError}</p> : null}
             <div className="news-grid">
-              {news.length ? (
+              {shouldLoadNews && news.length ? (
                 news.map((item) => (
                   <div className="card" key={item.id}>
                     <div className="pill">{item.source}</div>
@@ -294,11 +237,11 @@ export default function StocksPage() {
                     </p>
                   </div>
                 ))
-              ) : (
+              ) : shouldLoadNews ? (
                 <div className="card">
                   <p className="muted">当前暂无相关新闻。</p>
                 </div>
-              )}
+              ) : null}
             </div>
           </section>
         </>

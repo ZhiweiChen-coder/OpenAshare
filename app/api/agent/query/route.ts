@@ -26,11 +26,15 @@ export async function POST(request: Request) {
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+  const headers = new Headers(request.headers);
+  headers.set("Content-Type", "application/json");
+  headers.delete("host");
+  headers.delete("content-length");
 
   try {
     const res = await fetch(backendUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body,
       cache: "no-store",
       signal: controller.signal,
@@ -49,7 +53,10 @@ export async function POST(request: Request) {
         summary: isAbort
           ? "Agent request timed out after 2 minutes. The backend may be down, or stock analysis may be taking too long."
           : `Proxy error: ${msg}. Check BACKEND_BASE_URL and that uvicorn is running.`,
-        actions: ["Run ./scripts/run_api.sh and retry.", "If the API is already running, ask a lighter question or open the stock page for full analysis."],
+        actions: [
+          "Run ./scripts/run_api.sh and retry.",
+          "If the API is already running, ask a lighter question or open the stock page for full analysis.",
+        ],
         citations: [],
         payload: {},
       },

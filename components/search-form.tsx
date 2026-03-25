@@ -3,14 +3,18 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState, useTransition } from "react";
 
+import { StockAnalysisProgress } from "@/components/stock-analysis-progress";
+
 export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
   const [value, setValue] = useState(initialValue);
   const [submittedQuery, setSubmittedQuery] = useState("");
+  const [requestId, setRequestId] = useState("");
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
   useEffect(() => {
     setValue(initialValue);
   }, [initialValue]);
-  const router = useRouter();
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,8 +22,10 @@ export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
     if (!q) {
       return;
     }
-    const href = `/stocks?query=${encodeURIComponent(q)}`;
+    const nextRequestId = crypto.randomUUID();
+    const href = `/stocks?query=${encodeURIComponent(q)}&request_id=${encodeURIComponent(nextRequestId)}`;
     setSubmittedQuery(q);
+    setRequestId(nextRequestId);
     startTransition(() => {
       router.push(href);
     });
@@ -39,22 +45,15 @@ export function SearchForm({ initialValue = "" }: { initialValue?: string }) {
           {isPending ? "分析中..." : "开始分析"}
         </button>
       </form>
-      <div aria-live="polite" className="muted search-progress">
-        {isPending ? (
-          <>
-            <strong>正在请求分析结果</strong>
-            <span> · 正在为 {submittedQuery || "该标的"} 生成完整分析</span>
-          </>
-        ) : (
-          "输入股票后，会自动完成：识别标的 → 拉取行情和技术指标 → 整合 AI 观点与相关新闻。"
-        )}
-      </div>
+      {isPending ? (
+        <div aria-live="polite">
+          <StockAnalysisProgress query={submittedQuery} requestId={requestId} compact />
+        </div>
+      ) : (
+        <div aria-live="polite" className="muted search-progress">
+          输入股票后，会自动完成：识别标的 → 拉取行情和技术指标 → 整理技术结论与页面结果。
+        </div>
+      )}
     </div>
   );
 }
-
-const SEARCH_PROGRESS_STEPS = [
-  "1. 识别股票与市场",
-  "2. 拉取行情与技术指标",
-  "3. 整理技术结论和要点",
-];
