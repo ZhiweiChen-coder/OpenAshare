@@ -102,7 +102,13 @@ export function Nav() {
         <span style={{ transform: `scaleX(${progress / 100})` }} />
       </div>
       <Link href="/" className="logo" onClick={() => handleNavStart("/")}>
-        OpenAshare
+        <span className="logo-mark" aria-hidden="true">
+          OA
+        </span>
+        <span className="logo-text">
+          <span className="logo-name">OpenAshare</span>
+          <span className="logo-tag">A 股原生智能引擎</span>
+        </span>
       </Link>
       {isLanding ? (
         <div className="nav-links">

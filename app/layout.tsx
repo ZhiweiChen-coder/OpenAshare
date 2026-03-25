@@ -11,6 +11,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "OpenAshare",
   description: "AI-powered stock analysis, news and portfolio workstation.",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

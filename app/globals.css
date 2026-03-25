@@ -1040,14 +1040,59 @@ button, input, textarea { font: inherit; }
   z-index: 30;
 }
 .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.02rem;
   color: var(--ink);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--line-strong);
-  background: linear-gradient(90deg, rgba(190, 91, 54, 0.12), rgba(255, 255, 255, 0.72));
-  letter-spacing: 0.06em;
+  padding: 8px 14px 8px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(19, 19, 19, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(190, 91, 54, 0.14), transparent 34%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.88), rgba(246, 241, 234, 0.92));
+  box-shadow: 0 12px 26px rgba(25, 22, 18, 0.06);
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.05;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+.logo:hover {
+  transform: translateY(-1px);
+  border-color: rgba(190, 91, 54, 0.22);
+  box-shadow: 0 16px 30px rgba(25, 22, 18, 0.08);
+}
+.logo-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(190, 91, 54, 0.14), rgba(15, 138, 123, 0.16)),
+    rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(19, 19, 19, 0.08);
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #191716;
+  letter-spacing: 0.02em;
+}
+.logo-text {
+  display: grid;
+  gap: 3px;
+  align-items: center;
+}
+.logo-name {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+.logo-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .nav-links { display: flex; gap: 4px; flex-wrap: wrap; }
