@@ -31,7 +31,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         Agent
       </button>
-      <aside className={`agent-sidebar ${sidebarOpen ? "open" : "closed"}`}>
+      <aside
+        className={`agent-sidebar ${sidebarOpen ? "open" : "closed"}`}
+        aria-hidden={!sidebarOpen}
+        data-state={sidebarOpen ? "open" : "closed"}
+      >
         <div className="sidebar-body">
           <AgentChat compact />
         </div>

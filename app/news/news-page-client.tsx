@@ -165,7 +165,9 @@ export function NewsPageClient() {
             </div>
             {showAgentGate ? <span className="pill">未解锁</span> : null}
             {!showAgentGate && agentStatus === "loading" ? <span className="pill">加载中</span> : null}
-            {!showAgentGate && agentStatus === "ok" && agentResponse ? <span className="pill">{agentResponse.intent}</span> : null}
+            {!showAgentGate && agentStatus === "ok" && agentResponse ? (
+              formatIntentLabel(agentResponse.intent) ? <span className="pill">{formatIntentLabel(agentResponse.intent)}</span> : null
+            ) : null}
             {!showAgentGate && agentStatus === "error" ? (
               <button className="button ghost" type="button" onClick={loadAgent}>
                 重试 Agent
@@ -579,7 +581,7 @@ function buildSummaryLead(sections: SummarySection[]) {
 }
 
 function formatIntentLabel(intent: string) {
-  if (intent === "pydantic_ai_agent") return "智能摘要";
+  if (intent === "pydantic_ai_agent") return null;
   if (intent === "web_search_lookup") return "联网检索";
   if (intent === "news_lookup") return "消息追踪";
   return intent;

@@ -490,21 +490,22 @@ export function AgentChat({ compact = false }: AgentChatProps) {
         ) : null}
 
         <div className="gpt-chat-log" ref={compactLogRef}>
-          {memoryMeta ? <MemoryPanel meta={memoryMeta} /> : null}
-          {messages.length <= 1 ? (
-            <section className="gpt-welcome-card">
-              <h3>直接提问</h3>
-              <p className="muted">支持全球新闻、热点、个股和持仓问答。</p>
-              <div className="gpt-suggestion-grid">
-                {DEFAULT_PROMPTS.map((prompt) => (
-                  <button className="gpt-suggestion" key={prompt} onClick={() => ask(prompt)} type="button">
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
-          <div className="chat-log chat-log-full">
+          <div className="agent-session-surface" key={currentSession?.id ?? "empty"}>
+            {memoryMeta ? <MemoryPanel meta={memoryMeta} /> : null}
+            {messages.length <= 1 ? (
+              <section className="gpt-welcome-card">
+                <h3>直接提问</h3>
+                <p className="muted">支持全球新闻、热点、个股和持仓问答。</p>
+                <div className="gpt-suggestion-grid">
+                  {DEFAULT_PROMPTS.map((prompt) => (
+                    <button className="gpt-suggestion" key={prompt} onClick={() => ask(prompt)} type="button">
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+            <div className="chat-log chat-log-full">
             {compactMessages.map((message) => (
               <div className={`chat-row ${message.role}`} key={message.id}>
                 <div className={`chat-avatar ${message.role}`}>{message.role === "user" ? "你" : "A"}</div>
@@ -523,22 +524,23 @@ export function AgentChat({ compact = false }: AgentChatProps) {
                 </div>
               </div>
             ))}
-            {busy ? (
-              <div className="chat-row agent">
-                <div className="chat-avatar agent">A</div>
-                <div className="gpt-bubble agent">
-                  <div className="gpt-thinking">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                  <div className="gpt-progress-copy">
-                    <strong>{progressStages[progressStep] ?? "处理中"}</strong>
-                    <p>{progressStages.map((stage, index) => `${index + 1}. ${stage}`).join(" · ")}</p>
+              {busy ? (
+                <div className="chat-row agent">
+                  <div className="chat-avatar agent">A</div>
+                  <div className="gpt-bubble agent">
+                    <div className="gpt-thinking">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                    <div className="gpt-progress-copy">
+                      <strong>{progressStages[progressStep] ?? "处理中"}</strong>
+                      <p>{progressStages.map((stage, index) => `${index + 1}. ${stage}`).join(" · ")}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -861,25 +863,28 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
     analysis.stock_name,
   )}&quantity=100&focus=cost&return_to=${encodeURIComponent("/agent")}&return_label=${encodeURIComponent("Agent")}`;
   return (
-    <div className="card">
-      <div className="pill">股票分析卡片</div>
-      <h3 style={{ marginTop: 12 }}>
-        {analysis.stock_name} ({analysis.stock_code})
-      </h3>
-      <div className="grid-two" style={{ marginTop: 12 }}>
-        <div className="card">
-          <div className="muted">最新价</div>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">股票分析</div>
+      <div className="agent-card-head">
+        <h3>
+          {analysis.stock_name} ({analysis.stock_code})
+        </h3>
+        <div className="agent-card-subtitle">把价格、信号和操作放在一个更轻的卡片里。</div>
+      </div>
+      <div className="agent-card-metrics">
+        <div className="agent-card-metric">
+          <span>最新价</span>
           <strong>{analysis.quote.current_price.toFixed(2)}</strong>
         </div>
-        <div className="card">
-          <div className="muted">信号</div>
+        <div className="agent-card-metric">
+          <span>信号</span>
           <strong>
             {analysis.signal_summary.overall_signal} / {analysis.signal_summary.overall_score}
           </strong>
         </div>
       </div>
       {analysis.technical_commentary?.length ? (
-        <div className="tag-list" style={{ marginTop: 12 }}>
+        <div className="tag-list">
           {analysis.technical_commentary.slice(0, 3).map((item) => (
             <span className="tag" key={item}>
               {item}
@@ -887,7 +892,7 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
           ))}
         </div>
       ) : null}
-      <div className="inline-actions" style={{ marginTop: 14 }}>
+      <div className="inline-actions agent-card-actions">
         <Link
           href={`/stocks?query=${encodeURIComponent(analysis.stock_code)}&panel=overview#overview`}
           className="button ghost"
@@ -910,16 +915,18 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
 
 function GlobalNewsCards({ news }: { news: GlobalNewsItem[] }) {
   return (
-    <div className="card">
-      <div className="pill">全球重点新闻</div>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">全球重点新闻</div>
+      <div className="agent-card-list">
         {news.slice(0, 4).map((item) => (
-          <div className="card" key={item.id}>
-            <strong>{item.title}</strong>
+          <div className="agent-card-row" key={item.id}>
+            <div className="agent-card-row-head">
+              <strong>{item.title}</strong>
+              <span className="muted">{item.source}</span>
+            </div>
             <p className="muted">{truncate(item.summary, 160)}</p>
             <div className="tag-list">
               <span className="tag">{item.topic}</span>
-              <span className="tag">{item.source}</span>
               <span className="tag">影响 {item.impact_level}</span>
             </div>
           </div>
@@ -931,17 +938,19 @@ function GlobalNewsCards({ news }: { news: GlobalNewsItem[] }) {
 
 function WebResultCards({ results }: { results: WebSearchResult[] }) {
   return (
-    <div className="card">
-      <div className="pill">联网搜索结果</div>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">联网搜索结果</div>
+      <div className="agent-card-list">
         {results.slice(0, 4).map((item) => (
-          <div className="card" key={item.id}>
-            <a href={item.url} target="_blank" rel="noreferrer">
-              <strong>{item.title}</strong>
-            </a>
+          <div className="agent-card-row" key={item.id}>
+            <div className="agent-card-row-head">
+              <a href={item.url} target="_blank" rel="noreferrer" className="agent-card-row-link">
+                <strong>{item.title}</strong>
+              </a>
+              <span className="muted">{item.source}</span>
+            </div>
             <p className="muted">{truncate(item.snippet, 160)}</p>
             <div className="tag-list">
-              <span className="tag">{item.source}</span>
               <span className="tag">{item.provider}</span>
               {item.published_at ? <span className="tag">{item.published_at}</span> : null}
             </div>
@@ -954,19 +963,21 @@ function WebResultCards({ results }: { results: WebSearchResult[] }) {
 
 function NewsCards({ news }: { news: NewsItem[] }) {
   return (
-    <div className="card">
-      <div className="pill">消息卡片</div>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">消息卡片</div>
+      <div className="agent-card-list">
         {news.slice(0, 3).map((item) => (
-          <div className="card" key={item.id}>
-            <strong>{item.title}</strong>
+          <div className="agent-card-row" key={item.id}>
+            <div className="agent-card-row-head">
+              <strong>{item.title}</strong>
+              <span className="muted">{item.source}</span>
+            </div>
             <p className="muted">{truncate(item.summary, 160)}</p>
             <div className="tag-list">
-              <span className="tag">{item.source}</span>
               <span className="tag">影响 {item.impact_level}</span>
               <span className="tag">{item.sentiment}</span>
             </div>
-            <div className="inline-actions" style={{ marginTop: 10 }}>
+            <div className="inline-actions agent-card-actions">
               <StockPanelLink stockCode={item.stock_code} panel="news" className="button ghost">
                 查看该股消息
               </StockPanelLink>
@@ -980,12 +991,15 @@ function NewsCards({ news }: { news: NewsItem[] }) {
 
 function HotspotCards({ hotspots }: { hotspots: HotspotItem[] }) {
   return (
-    <div className="card">
-      <div className="pill">热点卡片</div>
-      <div className="stack" style={{ marginTop: 12 }}>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">热点卡片</div>
+      <div className="agent-card-list">
         {hotspots.slice(0, 3).map((item) => (
-          <div className="card" key={item.topic_name}>
-            <strong>{item.topic_name}</strong>
+          <div className="agent-card-row" key={item.topic_name}>
+            <div className="agent-card-row-head">
+              <strong>{item.topic_name}</strong>
+              <span className="muted">{item.related_stocks.length} 只相关标的</span>
+            </div>
             <p className="muted">{item.ai_summary || item.reason}</p>
             <div className="tag-list">
               {item.related_stocks.slice(0, 3).map((stock) => (
@@ -998,7 +1012,7 @@ function HotspotCards({ hotspots }: { hotspots: HotspotItem[] }) {
                 </Link>
               ))}
             </div>
-            <div className="inline-actions" style={{ marginTop: 10 }}>
+            <div className="inline-actions agent-card-actions">
               <Link
                 href={`/hotspots?topic=${encodeURIComponent(item.topic_name)}#topic-${encodeURIComponent(item.topic_name)}`}
                 className="button ghost"
@@ -1027,33 +1041,40 @@ function HotspotCards({ hotspots }: { hotspots: HotspotItem[] }) {
 
 function PortfolioCard({ analysis }: { analysis: PortfolioAnalysisResponse }) {
   return (
-    <div className="card">
-      <div className="pill">持仓卡片</div>
-      <div className="grid-two" style={{ marginTop: 12 }}>
-        <div className="card">
-          <div className="muted">总盈亏</div>
+    <div className="agent-payload-card">
+      <div className="agent-card-kicker">持仓卡片</div>
+      <div className="agent-card-head">
+        <h3>组合表现</h3>
+        <div className="agent-card-subtitle">把盈亏、收益率和重点持仓收进一张卡片里。</div>
+      </div>
+      <div className="agent-card-metrics">
+        <div className="agent-card-metric">
+          <span>总盈亏</span>
           <strong className={analysis.total_pnl >= 0 ? "signal-up" : "signal-down"}>{analysis.total_pnl.toFixed(2)}</strong>
         </div>
-        <div className="card">
-          <div className="muted">收益率</div>
+        <div className="agent-card-metric">
+          <span>收益率</span>
           <strong>{analysis.total_pnl_pct.toFixed(2)}%</strong>
         </div>
       </div>
       {analysis.positions?.length ? (
-        <div className="stack" style={{ marginTop: 12 }}>
+        <div className="agent-card-list">
           {analysis.positions.slice(0, 3).map((item) => (
-            <div className="card" key={`${item.position.id}-${item.position.stock_code}`}>
-              <strong>
-                {item.position.stock_name} ({item.position.stock_code})
-              </strong>
+            <div className="agent-card-row" key={`${item.position.id}-${item.position.stock_code}`}>
+              <div className="agent-card-row-head">
+                <strong>
+                  {item.position.stock_name} ({item.position.stock_code})
+                </strong>
+                <span className="muted">风险 {item.risk_level}</span>
+              </div>
               <p className="muted">
-                盈亏 {item.pnl.toFixed(2)} ({item.pnl_pct.toFixed(2)}%) · 风险 {item.risk_level}
+                盈亏 {item.pnl.toFixed(2)} ({item.pnl_pct.toFixed(2)}%)
               </p>
             </div>
           ))}
         </div>
       ) : null}
-      <div style={{ marginTop: 14 }}>
+      <div className="agent-card-actions inline-actions">
         <Link href="/portfolio" className="button ghost">
           打开持仓页
         </Link>

@@ -57,9 +57,15 @@ export function StockPanelLink({ stockCode, panel, className, children }: StockP
       aria-busy={isNavigating}
     >
       {isNavigating && (panel === "ai" || panel === "news") ? (
-        <span className="button-loading-copy">
-          <strong>{panel === "ai" ? "AI 分析" : "相关新闻"}</strong>
-          <span>{openingSteps[stepIndex]}</span>
+        <span className="button-loading-copy button-loading-copy--panel">
+          <span className="button-loading-kicker">{panel === "ai" ? "AI 分析" : "相关新闻"}</span>
+          <strong>{openingSteps[stepIndex]}</strong>
+          <span className="button-loading-stage">
+            {panel === "ai" ? "正在准备上下文" : "正在整理相关消息"}
+          </span>
+          <span className={`button-loading-track ${panel}`} aria-hidden="true">
+            <span style={{ width: `${((stepIndex + 1) / openingSteps.length) * 100}%` }} />
+          </span>
         </span>
       ) : (
         children
