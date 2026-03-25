@@ -164,6 +164,7 @@ export NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 - Cloudflare 负责对外域名
 
 Oracle 这台机器只需要暴露后端，不再运行 `next build` 或 `next start`。部署说明见 [deploy/oracle/README.md](./deploy/oracle/README.md)。
+Vercel 前端部署已经通过 [`.vercelignore`](/Users/peter/Desktop/项目/Ashare-AI-Strategy-Analyst/.vercelignore) 排除了根目录后端与 Python 依赖清单。
 
 推荐的域名拆分：
 

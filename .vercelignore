@@ -1,0 +1,13 @@
+# Frontend-only Vercel deployment.
+# Keep the Next.js app, but exclude the Python backend and its packaging files.
+api/
+ashare/
+requirements.txt
+requirements_api.txt
+requirements_mac.txt
+scripts/run_api.sh
+scripts/run_api_prod.sh
+deploy/oracle/
+data/
+logs/
+*.py
