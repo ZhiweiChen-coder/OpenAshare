@@ -2,7 +2,6 @@ import { cookies } from "next/headers";
 
 import { DemoAccessGate } from "@/components/demo-access-gate";
 import { PortfolioShell } from "@/components/portfolio-shell";
-import { getPortfolioAnalysis, listPortfolioPositions } from "@/lib/api";
 import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
 import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
 
@@ -13,37 +12,55 @@ type PageProps = {
     quantity?: string;
     cost_price?: string;
     focus?: string;
+    strategy_key?: string;
+    mode?: string;
+    source_topic?: string;
+    plan_reason?: string;
+    plan_entry_trigger?: string;
+    plan_entry_zone?: string;
+    plan_stop_loss?: string;
+    plan_take_profit?: string;
+    plan_max_position_pct?: string;
+    status?: string;
   }>;
 };
 
 export default async function PortfolioPage({ searchParams }: PageProps) {
   const cookieStore = await cookies();
-  const cookieHeader = cookieStore
-    .getAll()
-    .map((entry) => `${entry.name}=${entry.value}`)
-    .join("; ");
   const demoAccess = getDemoAccessStatusFromToken(cookieStore.get(DEMO_ACCESS_COOKIE_NAME)?.value);
   const prefills = await searchParams;
   if (!demoAccess.unlocked) {
     return (
       <section className="panel section">
-        <DemoAccessGate title="持仓管理已锁定" description="解锁后可以查看和编辑持仓、刷新组合分析。" />
+        <DemoAccessGate title="策略持股已锁定" description="解锁后可以查看和编辑策略持股，并刷新策略分析。" />
       </section>
     );
   }
-  const [positions, analysis] = await Promise.all([
-    listPortfolioPositions({ requestInit: { headers: { cookie: cookieHeader } } }).catch(() => []),
-    getPortfolioAnalysis({ requestInit: { headers: { cookie: cookieHeader } } }).catch(() => ({
-      total_cost: 0,
-      total_market_value: 0,
-      total_pnl: 0,
-      total_pnl_pct: 0,
-      concentration_risk: "unavailable",
-      technical_risk: "unavailable",
-      rebalance_suggestions: ["后端不可达时，组合分析会显示在这里。"],
-      positions: [],
-    })),
-  ]);
 
-  return <PortfolioShell initialPositions={positions} initialAnalysis={analysis} initialPrefill={prefills} />;
+  return (
+    <PortfolioShell
+      initialStrategyHoldings={[]}
+      initialStrategyAnalysis={{
+        total_cost: 0,
+        total_market_value: 0,
+        total_pnl: 0,
+        total_pnl_pct: 0,
+        total_realized_pnl: 0,
+        holding_count: 0,
+        active_count: 0,
+        watching_count: 0,
+        planned_count: 0,
+        weakening_count: 0,
+        exited_count: 0,
+        invalidated_count: 0,
+        win_rate_pct: 0,
+        average_score: 0,
+        todo_items: [],
+        review_items: [],
+        holdings: [],
+      }}
+      initialMarketRegime={null}
+      initialPrefill={prefills}
+    />
+  );
 }

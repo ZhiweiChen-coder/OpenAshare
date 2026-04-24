@@ -70,6 +70,9 @@ BASE_STOCK_CATALOG: Dict[str, Dict[str, str]] = {
     "歌尔股份": {"code": "sz002241", "market": "A股-深圳", "category": "科技"},
     "蓝思科技": {"code": "sz300433", "market": "A股-创业板", "category": "科技"},
     "欧菲光": {"code": "sz002456", "market": "A股-深圳", "category": "科技"},
+    "海光信息": {"code": "sh688041", "market": "A股-科创板", "category": "科技"},
+    "寒武纪": {"code": "sh688256", "market": "A股-科创板", "category": "科技"},
+    "兆易创新": {"code": "sh603986", "market": "A股-上海", "category": "科技"},
     # 新能源
     "阳光电源": {"code": "sz300274", "market": "A股-创业板", "category": "新能源"},
     "通威股份": {"code": "sh600438", "market": "A股-上海", "category": "新能源"},
@@ -117,6 +120,7 @@ def load_stock_pool(path: Path = DEFAULT_STOCK_POOL_PATH) -> Dict[str, str]:
 
 def save_stock_pool(stock_pool: Dict[str, str], path: Path = DEFAULT_STOCK_POOL_PATH) -> None:
     """保存股票池到本地文件。"""
+    path = path.resolve()
     _ensure_parent(path)
     normalized = {
         name: normalize_stock_code(code)

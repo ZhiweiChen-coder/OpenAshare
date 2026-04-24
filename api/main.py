@@ -20,11 +20,6 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.agent_pydantic import (
-    AgentDeps,
-    create_agent,
-    run_agent_async,
-)
 from api.schemas import (
     AnalysisProgressResponse,
     AgentProgressEvent,
@@ -34,10 +29,14 @@ from api.schemas import (
     GlobalNewsItem,
     HotspotDetailResponse,
     HotspotItem,
+    MarketRegimeResponse,
     NewsItem,
     StockAnalysisProgressEvent,
     PortfolioAnalysisResponse,
     PortfolioPosition,
+    StrategyHolding,
+    StrategyHoldingAnalysisResponse,
+    StrategyScreenResponse,
     StockAnalysisResponse,
     StockSearchResult,
     UserSettingsResponse,
@@ -46,14 +45,16 @@ from api.schemas import (
 )
 from api.sse import encode_sse, sse_response
 from api.settings_store import UserSettingsStore
-from api.services import AgentService, HotspotService, NewsService, PortfolioService, StockAnalysisService, WebSearchService
+from api.services import AgentService, HotspotService, MarketService, NewsService, PortfolioService, StockAnalysisService, StrategyService, WebSearchService
 from ashare.config import PROJECT_ROOT
 
 settings_store = UserSettingsStore(PROJECT_ROOT / "data" / "user_settings.json")
 stock_service = StockAnalysisService(settings_store=settings_store)
 news_service = NewsService()
 hotspot_service = HotspotService(news_service=news_service)
+market_service = MarketService(stock_service)
 portfolio_service = PortfolioService()
+strategy_service = StrategyService(stock_service, news_service, hotspot_service, market_service)
 web_search_service = WebSearchService()
 agent_service = AgentService(stock_service, news_service, hotspot_service, portfolio_service, web_search_service)
 
@@ -563,8 +564,14 @@ HEARTBEAT_INTERVAL_MINUTES = int(os.environ.get("AGENT_HEARTBEAT_MINUTES", "15")
 
 # PydanticAI agent (used when LLM_API_KEY is set)
 _pydantic_agent: Optional[object] = None
-_agent_deps: Optional[AgentDeps] = None
+_agent_deps: Optional[object] = None
 _pydantic_agent_signature: Optional[tuple[str, str, str]] = None
+
+
+def _load_agent_runtime():
+    from api.agent_pydantic import AgentDeps, create_agent, run_agent_async
+
+    return AgentDeps, create_agent, run_agent_async
 
 
 def _get_pydantic_agent():
@@ -583,6 +590,7 @@ def _get_pydantic_agent():
     if _pydantic_agent is not None and _pydantic_agent_signature == signature:
         return _pydantic_agent, _agent_deps
     try:
+        AgentDeps, create_agent, _ = _load_agent_runtime()
         _pydantic_agent = create_agent(
             api_key=runtime_config.llm_api_key,
             base_url=runtime_config.llm_base_url,
@@ -817,6 +825,29 @@ def get_hotspot_detail(request: Request, topic_name: str) -> Response:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/api/market-regime", response_model=MarketRegimeResponse)
+def get_market_regime(request: Request) -> Response:
+    try:
+        payload = market_service.get_market_regime()
+        return _cached_json_response(request, payload, max_age=45, stale_while_revalidate=90)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/strategies/can-slim/screen", response_model=StrategyScreenResponse)
+def get_can_slim_screen(
+    request: Request,
+    scope: str = Query("hotspot", pattern="^(hotspot|market)$"),
+    topic: Optional[str] = Query(None),
+    limit: int = Query(8, ge=1, le=20),
+) -> Response:
+    try:
+        payload = strategy_service.screen_can_slim(scope=scope, topic=topic, limit=limit)
+        return _cached_json_response(request, payload, max_age=60, stale_while_revalidate=120)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/portfolio", response_model=List[PortfolioPosition])
 def list_portfolio_positions(request: Request) -> List[PortfolioPosition]:
     _require_demo_access(request, "持仓管理")
@@ -846,6 +877,43 @@ def delete_portfolio_position(request: Request, position_id: int) -> Response:
 def analyze_portfolio(request: Request) -> PortfolioAnalysisResponse:
     _require_demo_access(request, "持仓分析")
     return portfolio_service.analyze_portfolio()
+
+
+@app.get("/api/strategy-holdings", response_model=List[StrategyHolding])
+def list_strategy_holdings(request: Request) -> List[StrategyHolding]:
+    _require_demo_access(request, "策略持股")
+    return strategy_service.list_holdings()
+
+
+@app.post("/api/strategy-holdings", response_model=StrategyHolding, status_code=201)
+def create_strategy_holding(request: Request, holding: StrategyHolding) -> StrategyHolding:
+    _require_demo_access(request, "策略持股")
+    return strategy_service.create_holding(holding)
+
+
+@app.get("/api/strategy-holdings/analysis", response_model=StrategyHoldingAnalysisResponse)
+def analyze_strategy_holdings(request: Request) -> StrategyHoldingAnalysisResponse:
+    _require_demo_access(request, "策略持股分析")
+    return strategy_service.analyze_holdings()
+
+
+@app.post("/api/strategy-holdings/refresh", response_model=StrategyHoldingAnalysisResponse)
+def refresh_strategy_holdings(request: Request) -> StrategyHoldingAnalysisResponse:
+    _require_demo_access(request, "策略持股分析")
+    return strategy_service.refresh_holdings()
+
+
+@app.put("/api/strategy-holdings/{holding_id}", response_model=StrategyHolding)
+def update_strategy_holding(request: Request, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
+    _require_demo_access(request, "策略持股")
+    return strategy_service.update_holding(holding_id, holding)
+
+
+@app.delete("/api/strategy-holdings/{holding_id}", status_code=204)
+def delete_strategy_holding(request: Request, holding_id: int) -> Response:
+    _require_demo_access(request, "策略持股")
+    strategy_service.delete_holding(holding_id)
+    return Response(status_code=204)
 
 
 # Minimal JSON body for agent error - always 200 so frontend never sees 500
@@ -1247,6 +1315,7 @@ async def _run_agent_request(
         if progress_callback:
             progress_callback("select_engine", 25, "已选择智能引擎，准备执行工具调用", {"engine": "pydantic_ai"})
         try:
+            _, _, run_agent_async = _load_agent_runtime()
             enriched_query = _build_enriched_agent_query(payload.query, merged_history, memory_profile)
             if progress_callback is not None:
                 try:

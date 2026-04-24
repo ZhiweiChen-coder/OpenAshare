@@ -144,6 +144,27 @@ class HotspotDetailResponse(BaseModel):
     history: List[HotspotHistoryPoint] = Field(default_factory=list)
 
 
+class MarketIndexSnapshot(BaseModel):
+    stock_code: str
+    stock_name: str
+    current_price: float
+    change_pct: float
+    above_ma20: bool = False
+    above_ma60: bool = False
+    trend_score: float = 0
+
+
+class MarketRegimeResponse(BaseModel):
+    regime: Literal["risk_on", "neutral", "risk_off"] = "neutral"
+    score: float = 50
+    action_bias: str = ""
+    position_guidance: str = ""
+    summary: str = ""
+    notes: List[str] = Field(default_factory=list)
+    indices: List[MarketIndexSnapshot] = Field(default_factory=list)
+    updated_at: Optional[datetime] = None
+
+
 class PortfolioPosition(BaseModel):
     id: Optional[int] = None
     stock_code: str
@@ -175,6 +196,119 @@ class PortfolioAnalysisResponse(BaseModel):
     technical_risk: str
     rebalance_suggestions: List[str]
     positions: List[PositionAnalysis]
+
+
+class StrategyScoreBreakdown(BaseModel):
+    c: float = 0
+    a: float = 0
+    n: float = 0
+    s: float = 0
+    l: float = 0
+    i: float = 0
+    m: float = 0
+    total: float = 0
+
+
+class StrategyCandidate(BaseModel):
+    strategy_key: str
+    stock_code: str
+    stock_name: str
+    market: str
+    score: StrategyScoreBreakdown
+    factor_notes: Dict[str, str] = Field(default_factory=dict)
+    reasons: List[str] = Field(default_factory=list)
+    risks: List[str] = Field(default_factory=list)
+    source_scope: Literal["hotspot", "market"] = "hotspot"
+    source_topic: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StrategyScreenResponse(BaseModel):
+    strategy_key: str
+    scope: Literal["hotspot", "market"]
+    topic: Optional[str] = None
+    generated_at: datetime
+    candidates: List[StrategyCandidate] = Field(default_factory=list)
+
+
+class StrategyHolding(BaseModel):
+    id: Optional[int] = None
+    strategy_key: str
+    stock_code: str
+    stock_name: str
+    entry_price: float
+    quantity: float
+    entry_date: Optional[str] = None
+    exit_price: Optional[float] = None
+    exit_date: Optional[str] = None
+    source_topic: Optional[str] = None
+    plan_reason: Optional[str] = None
+    plan_entry_trigger: Optional[str] = None
+    plan_entry_zone: Optional[str] = None
+    plan_stop_loss: Optional[float] = None
+    plan_take_profit: Optional[float] = None
+    plan_max_position_pct: Optional[float] = None
+    notes: Optional[str] = None
+    status: Literal["watching", "planned", "holding", "weakening", "exited", "invalidated"] = "planned"
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class StrategyHoldingAnalysis(BaseModel):
+    holding: StrategyHolding
+    current_price: float
+    market_value: float
+    pnl: float
+    pnl_pct: float
+    realized_pnl: float = 0
+    realized_pnl_pct: float = 0
+    strategy_score: StrategyScoreBreakdown
+    thesis_status: Literal["active", "weakening", "broken"]
+    factor_notes: Dict[str, str] = Field(default_factory=dict)
+    invalidation_reason: Optional[str] = None
+    action_label: str = "继续持有"
+    action_reason: str = ""
+    trigger_hits: List[str] = Field(default_factory=list)
+    alerts: List[str] = Field(default_factory=list)
+
+
+class StrategyTodoItem(BaseModel):
+    holding_id: Optional[int] = None
+    stock_code: str
+    stock_name: str
+    status: str
+    action_label: str
+    action_reason: str
+    priority: int = 0
+
+
+class StrategyReviewItem(BaseModel):
+    holding_id: Optional[int] = None
+    stock_code: str
+    stock_name: str
+    status: str
+    summary: str
+    outcome_label: str
+
+
+class StrategyHoldingAnalysisResponse(BaseModel):
+    total_cost: float
+    total_market_value: float
+    total_pnl: float
+    total_pnl_pct: float
+    total_realized_pnl: float = 0
+    holding_count: int = 0
+    active_count: int = 0
+    watching_count: int = 0
+    planned_count: int = 0
+    weakening_count: int = 0
+    exited_count: int = 0
+    invalidated_count: int = 0
+    win_rate_pct: float = 0
+    average_score: float = 0
+    todo_items: List[StrategyTodoItem] = Field(default_factory=list)
+    review_items: List[StrategyReviewItem] = Field(default_factory=list)
+    holdings: List[StrategyHoldingAnalysis] = Field(default_factory=list)
 
 
 class AgentHistoryTurn(BaseModel):

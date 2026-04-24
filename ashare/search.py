@@ -6,27 +6,46 @@
 
 import re
 import requests
-import json
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Dict, List, Optional
 import time
 
 from ashare.stock_pool import (
+    extract_symbol,
     get_base_stock_catalog,
     get_market_label,
     is_valid_stock_code,
+    load_stock_pool,
     normalize_stock_code,
+    save_stock_pool,
 )
 
 
 class StockSearcher:
     """智能股票搜索器"""
+
+    EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+    EASTMONEY_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8"
+    SINA_SUGGEST_URL = "https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key="
+    ONLINE_TIMEOUT = 5
     
     def __init__(self):
         """初始化搜索器"""
-        self.base_stock_db = get_base_stock_catalog()
+        self.base_stock_db = self._load_stock_db()
         self.search_cache = {}
         self.cache_expiry = 3600  # 缓存1小时
+
+    def _load_stock_db(self) -> Dict[str, Dict[str, str]]:
+        stock_db = get_base_stock_catalog()
+        for name, code in load_stock_pool().items():
+            stock_db.setdefault(
+                name,
+                {
+                    "code": code,
+                    "market": get_market_label(code),
+                    "category": "",
+                },
+            )
+        return stock_db
     
     def search_stocks(self, query: str, max_results: int = 10) -> List[Dict]:
         """
@@ -78,16 +97,18 @@ class StockSearcher:
             category_matches = self._category_match(query_lower)
             results.extend(category_matches)
         
-        # 6. 智能代码格式识别
+        # 6. 先尝试在线搜索，补齐本地股票库未收录的标的名称
+        if not results:
+            online_results = self._online_search(query)
+            for item in online_results:
+                self._persist_online_result(item)
+            results.extend(online_results)
+
+        # 7. 智能代码格式识别，作为最终兜底
         if not results:
             code_validation = self._validate_and_create_stock(query)
             if code_validation:
                 results.append(code_validation)
-        
-        # 7. 尝试在线搜索（如果本地搜索无结果）
-        if not results:
-            online_results = self._online_search(query)
-            results.extend(online_results)
         
         # 去重和排序
         unique_results = self._deduplicate_results(results)
@@ -196,10 +217,187 @@ class StockSearcher:
         return None
     
     def _online_search(self, query: str) -> List[Dict]:
-        """在线搜索股票（预留接口）"""
-        # 这里可以集成第三方股票数据API
-        # 例如：东方财富、新浪财经等
+        """在线搜索股票，补齐本地股票库未覆盖的名称和代码映射。"""
+        eastmoney_results = self._search_eastmoney(query)
+        if eastmoney_results:
+            return eastmoney_results
+
+        normalized = normalize_stock_code(query)
+        if is_valid_stock_code(normalized):
+            sina_result = self._search_sina_by_code(normalized)
+            if sina_result:
+                return [sina_result]
+
         return []
+
+    def _search_eastmoney(self, query: str) -> List[Dict]:
+        params = {
+            "input": query,
+            "type": "14",
+            "token": self.EASTMONEY_TOKEN,
+            "count": "10",
+        }
+        headers = {"User-Agent": "Mozilla/5.0"}
+        try:
+            response = requests.get(
+                self.EASTMONEY_SUGGEST_URL,
+                params=params,
+                headers=headers,
+                timeout=self.ONLINE_TIMEOUT,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError):
+            return []
+
+        data = payload.get("QuotationCodeTable", {}).get("Data", [])
+        if not isinstance(data, list):
+            return []
+
+        results: List[Dict] = []
+        for item in data:
+            parsed = self._parse_eastmoney_result(item, query)
+            if parsed:
+                results.append(parsed)
+        return results
+
+    def _parse_eastmoney_result(self, item: Dict, query: str) -> Optional[Dict]:
+        if not isinstance(item, dict):
+            return None
+
+        name = str(item.get("Name", "")).strip()
+        raw_code = str(item.get("Code", "")).strip()
+        security_type = str(item.get("SecurityTypeName", "")).strip()
+        classify = str(item.get("Classify", "")).strip()
+        if not name or not raw_code:
+            return None
+        if classify not in {"AStock", "Index", "HK"}:
+            return None
+
+        normalized_code = self._normalize_online_code(item)
+        if not normalized_code:
+            return None
+
+        normalized_query = normalize_stock_code(query).lower()
+        raw_query = query.strip().lower()
+        exact_name = raw_query == name.lower()
+        exact_code = normalized_query == normalized_code.lower() or raw_query == raw_code.lower()
+        score = 88 if (exact_name or exact_code) else 72
+        if exact_name and exact_code:
+            score = 96
+
+        category = classify
+        if security_type == "指数":
+            category = "指数"
+
+        return {
+            "name": name,
+            "code": normalized_code,
+            "market": get_market_label(normalized_code),
+            "category": category,
+            "score": score,
+            "match_type": "online_eastmoney",
+        }
+
+    def _normalize_online_code(self, item: Dict) -> Optional[str]:
+        quote_id = str(item.get("QuoteID", "")).strip()
+        raw_code = str(item.get("Code", "")).strip()
+        if not raw_code:
+            return None
+
+        prefix = ""
+        symbol = raw_code
+        if "." in quote_id:
+            prefix, symbol = quote_id.split(".", 1)
+
+        if prefix == "1":
+            return f"sh{symbol.zfill(6)}"
+        if prefix == "0":
+            return f"sz{symbol.zfill(6)}"
+        if prefix == "116":
+            return f"{symbol.zfill(5)}.HK"
+
+        security_type = str(item.get("SecurityTypeName", "")).strip()
+        classify = str(item.get("Classify", "")).strip()
+        if classify == "HK" or "港" in security_type:
+            return f"{raw_code.zfill(5)}.HK"
+        if "沪" in security_type:
+            return f"sh{raw_code.zfill(6)}"
+        if "深" in security_type or "创业" in security_type:
+            return f"sz{raw_code.zfill(6)}"
+        return normalize_stock_code(raw_code)
+
+    def _search_sina_by_code(self, normalized_code: str) -> Optional[Dict]:
+        symbol = extract_symbol(normalized_code)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        try:
+            response = requests.get(
+                f"{self.SINA_SUGGEST_URL}{symbol}",
+                headers=headers,
+                timeout=self.ONLINE_TIMEOUT,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            return None
+
+        match = re.search(r'"([^"]+)"', response.text)
+        if not match:
+            return None
+
+        entries = [item for item in match.group(1).split(";") if item.strip()]
+        for entry in entries:
+            parts = entry.split(",")
+            if len(parts) < 5:
+                continue
+            sina_code = normalize_stock_code(parts[0].strip())
+            if sina_code.lower() != normalized_code.lower():
+                continue
+            name = parts[4].strip()
+            if not name:
+                continue
+            return {
+                "name": name,
+                "code": sina_code,
+                "market": get_market_label(sina_code),
+                "category": "",
+                "score": 86,
+                "match_type": "online_sina",
+            }
+        return None
+
+    def _persist_online_result(self, item: Dict) -> None:
+        name = str(item.get("name", "")).strip()
+        code = normalize_stock_code(str(item.get("code", "")).strip())
+        if not name or not is_valid_stock_code(code):
+            return
+
+        existing = self.base_stock_db.get(name)
+        if existing and normalize_stock_code(existing.get("code", "")) == code:
+            return
+
+        try:
+            stock_pool = load_stock_pool()
+            if stock_pool.get(name) == code:
+                self.base_stock_db.setdefault(
+                    name,
+                    {
+                        "code": code,
+                        "market": item.get("market") or get_market_label(code),
+                        "category": item.get("category", ""),
+                    },
+                )
+                return
+
+            stock_pool[name] = code
+            save_stock_pool(stock_pool)
+            self.base_stock_db[name] = {
+                "code": code,
+                "market": item.get("market") or get_market_label(code),
+                "category": item.get("category", ""),
+            }
+            self.search_cache.clear()
+        except OSError:
+            return
     
     def _calculate_fuzzy_score(self, text: str, query: str) -> int:
         """计算模糊匹配分数"""
@@ -250,7 +448,31 @@ class StockSearcher:
                     'source': 'local'
                 }
         
-        # 如果本地没有，可以尝试在线获取
+        # 如果本地没有，在线补充股票名称
+        online_matches = self._online_search(extract_symbol(normalized))
+        for item in online_matches:
+            if item["code"].lower() == normalized.lower():
+                self._persist_online_result(item)
+                return {
+                    'name': item['name'],
+                    'code': normalized,
+                    'market': item['market'],
+                    'category': item.get('category', ''),
+                    'source': item.get('match_type', 'online'),
+                }
+
+        if is_valid_stock_code(normalized):
+            online_item = self._search_sina_by_code(normalized)
+            if online_item:
+                self._persist_online_result(online_item)
+                return {
+                    'name': online_item['name'],
+                    'code': normalized,
+                    'market': online_item['market'],
+                    'category': online_item.get('category', ''),
+                    'source': online_item.get('match_type', 'online'),
+                }
+
         return None
     
     def suggest_keywords(self, partial_query: str) -> List[str]:

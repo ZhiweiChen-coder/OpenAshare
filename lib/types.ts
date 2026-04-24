@@ -125,6 +125,27 @@ export type HotspotDetailResponse = {
   }>;
 };
 
+export type MarketIndexSnapshot = {
+  stock_code: string;
+  stock_name: string;
+  current_price: number;
+  change_pct: number;
+  above_ma20: boolean;
+  above_ma60: boolean;
+  trend_score: number;
+};
+
+export type MarketRegimeResponse = {
+  regime: "risk_on" | "neutral" | "risk_off";
+  score: number;
+  action_bias: string;
+  position_guidance: string;
+  summary: string;
+  notes: string[];
+  indices: MarketIndexSnapshot[];
+  updated_at?: string | null;
+};
+
 export type PortfolioPosition = {
   id?: number;
   stock_code: string;
@@ -157,6 +178,119 @@ export type PortfolioAnalysisResponse = {
     };
     suggestion: string;
   }>;
+};
+
+export type StrategyScoreBreakdown = {
+  c: number;
+  a: number;
+  n: number;
+  s: number;
+  l: number;
+  i: number;
+  m: number;
+  total: number;
+};
+
+export type StrategyCandidate = {
+  strategy_key: string;
+  stock_code: string;
+  stock_name: string;
+  market: string;
+  score: StrategyScoreBreakdown;
+  factor_notes: Record<string, string>;
+  reasons: string[];
+  risks: string[];
+  source_scope: "hotspot" | "market";
+  source_topic?: string | null;
+  metadata: Record<string, unknown>;
+};
+
+export type StrategyScreenResponse = {
+  strategy_key: string;
+  scope: "hotspot" | "market";
+  topic?: string | null;
+  generated_at: string;
+  candidates: StrategyCandidate[];
+};
+
+export type StrategyHolding = {
+  id?: number;
+  strategy_key: string;
+  stock_code: string;
+  stock_name: string;
+  entry_price: number;
+  quantity: number;
+  entry_date?: string | null;
+  exit_price?: number | null;
+  exit_date?: string | null;
+  source_topic?: string | null;
+  plan_reason?: string | null;
+  plan_entry_trigger?: string | null;
+  plan_entry_zone?: string | null;
+  plan_stop_loss?: number | null;
+  plan_take_profit?: number | null;
+  plan_max_position_pct?: number | null;
+  notes?: string | null;
+  status: "watching" | "planned" | "holding" | "weakening" | "exited" | "invalidated";
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type StrategyHoldingAnalysis = {
+  holding: StrategyHolding;
+  current_price: number;
+  market_value: number;
+  pnl: number;
+  pnl_pct: number;
+  realized_pnl: number;
+  realized_pnl_pct: number;
+  strategy_score: StrategyScoreBreakdown;
+  thesis_status: "active" | "weakening" | "broken";
+  factor_notes: Record<string, string>;
+  invalidation_reason?: string | null;
+  action_label: string;
+  action_reason: string;
+  trigger_hits: string[];
+  alerts: string[];
+};
+
+export type StrategyTodoItem = {
+  holding_id?: number | null;
+  stock_code: string;
+  stock_name: string;
+  status: string;
+  action_label: string;
+  action_reason: string;
+  priority: number;
+};
+
+export type StrategyReviewItem = {
+  holding_id?: number | null;
+  stock_code: string;
+  stock_name: string;
+  status: string;
+  summary: string;
+  outcome_label: string;
+};
+
+export type StrategyHoldingAnalysisResponse = {
+  total_cost: number;
+  total_market_value: number;
+  total_pnl: number;
+  total_pnl_pct: number;
+  total_realized_pnl: number;
+  holding_count: number;
+  active_count: number;
+  watching_count: number;
+  planned_count: number;
+  weakening_count: number;
+  exited_count: number;
+  invalidated_count: number;
+  win_rate_pct: number;
+  average_score: number;
+  todo_items: StrategyTodoItem[];
+  review_items: StrategyReviewItem[];
+  holdings: StrategyHoldingAnalysis[];
 };
 
 export type AgentResponse = {

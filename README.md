@@ -1,58 +1,102 @@
 # OpenAshare
 
-面向 A 股研究的本地优先智能分析工作台。
+> 面向 A 股研究者、量化爱好者和自托管玩家的本地优先 AI 分析工作台。
 
-[![Next.js](https://img.shields.io/badge/Next.js-15.5.12-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Agent](https://img.shields.io/badge/Agent-多轮分析-111827)]()
-[![Local First](https://img.shields.io/badge/Local%20First-本地优先-2563eb)]()
-[![Open Source](https://img.shields.io/badge/Open%20Source-100%25%20透明-16a34a)]()
-[![License](https://img.shields.io/badge/License-MIT-111827)](LICENSE)
+<p align="center">
+  <img src="assets/screenshots/home.png" alt="OpenAshare dashboard preview" width="920" />
+</p>
 
-OpenAshare 把单股分析、新闻解读、热点追踪、组合分析和 Agent 对话收进同一个工作流。它面向研究和展示场景，强调本地优先、可扩展和可解释的分析体验。
+<p align="center">
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5-000000?logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white" alt="Python" /></a>
+  <img src="https://img.shields.io/badge/AI%20Agent-多轮研究-111827" alt="AI Agent" />
+  <img src="https://img.shields.io/badge/Local%20First-本地优先-2563eb" alt="Local First" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-16a34a" alt="License" /></a>
+</p>
 
-## 核心卖点
+OpenAshare 把单股分析、新闻解读、热点追踪、策略观察、持仓复盘和 Agent 对话放进同一个研究流里。它不是一个“给结论就完事”的黑盒工具，而是一个可以本地运行、可以替换模型、可以继续改造的 A 股智能研究底座。
 
-- 一屏完成股票研究主流程
-- 技术指标、K 线、新闻与 AI 观点联动展示
-- 单股、热点、持仓、问答四条主线互相贯通
-- 支持本地优先的运行方式，适合研究和自托管
-- 公开展示时也能保持清晰的产品边界
+如果你也经常在行情软件、新闻页、表格、K 线图和 AI 聊天窗口之间来回横跳，OpenAshare 想解决的就是这件事：**少切页面，多形成判断。**
 
-## 产品能力
+## 为什么值得关注
 
-- **单股分析**：行情、技术指标、K 线、AI 解读
-- **新闻浏览**：个股新闻与全局新闻
-- **热点追踪**：主题热度、关联标的与趋势观察
-- **持仓管理**：组合录入、调整与组合分析
-- **Agent 对话**：跨页面统一问答入口
-- **演示访问**：轻量访问控制，适合公开展示
+- **一站式研究链路**：搜索股票、看行情快照、读技术指标、追消息催化、问 AI 观点，集中在一个工作台里完成。
+- **A 股场景优先**：围绕个股、板块热点、持仓组合、策略候选和市场状态组织页面，而不是套一层泛金融模板。
+- **本地优先与可自托管**：持仓、设置和部分研究数据优先保留在本地，适合个人研究、内部演示和私有化部署。
+- **模型可替换**：通过环境变量或设置页接入 DeepSeek、OpenAI-compatible API、本地模型网关等，不把研究流锁死在单一供应商。
+- **前后端边界清晰**：FastAPI 提供分析服务与 API contract，Next.js 负责交互体验，适合作为开源项目继续扩展。
 
-## 截图预览
+> 重要提示：本项目用于研究、学习和工具搭建，不构成投资建议。市场有风险，决策请自行负责。
 
-截图文件都放在 `assets/screenshots/` 目录下。
+## 功能预览
 
-| 首页 | 消息页 | 单股分析页 |
+| 工作台 | 消息流 | 单股分析 |
 | --- | --- | --- |
 | ![OpenAshare 首页](assets/screenshots/home.png) | ![OpenAshare 消息页](assets/screenshots/news.png) | ![OpenAshare 单股分析页](assets/screenshots/single-stock.png) |
 
+## 能做什么
+
+### 股票研究
+
+- 股票搜索与基础行情快照
+- K 线与技术指标联动展示
+- 规则信号、技术解读和 AI insight 并列呈现
+- 分析进度事件流，适合长任务的前端反馈
+
+### 新闻与热点
+
+- 个股新闻与全局市场新闻浏览
+- 热点主题聚合、热度分数与关联标的
+- 热点详情页串联相关消息与历史热度
+- 市场状态面板辅助判断 risk-on / neutral / risk-off
+
+### 持仓与策略
+
+- 本地组合录入、持仓成本与数量管理
+- 组合盈亏、集中度风险和再平衡建议
+- 策略候选筛选与观察清单
+- 策略持仓复盘、状态跟踪和行动提示
+
+### Agent 对话
+
+- 跨页面统一的研究问答入口
+- 可调用股票分析、热点、新闻、组合等服务
+- 支持会话上下文与工具调用进度
+- 智能引擎失败时可回退到规则分析路径
+
+## 技术架构
+
+```mermaid
+flowchart LR
+  User["研究者 / 交易复盘"] --> UI["Next.js App Router"]
+  UI --> API["FastAPI 服务层"]
+  API --> Stock["股票分析服务"]
+  API --> News["新闻与热点服务"]
+  API --> Portfolio["组合与策略服务"]
+  API --> Agent["Agent 编排"]
+  Stock --> AkShare["AkShare / pandas"]
+  Portfolio --> SQLite["SQLite 本地数据"]
+  Agent --> LLM["OpenAI-compatible LLM"]
+```
+
 ## 技术栈
 
-- 前端：Next.js App Router
-- 后端：FastAPI
-- 数据处理：AkShare、pandas、自定义分析服务
-- 存储：SQLite，用于本地持仓和设置数据
+- **Frontend**：Next.js App Router、React 19、TypeScript、lightweight-charts
+- **Backend**：FastAPI、Pydantic、SSE progress events
+- **Data & Analysis**：AkShare、pandas、自定义技术分析与策略服务
+- **Storage**：SQLite、本地 JSON 设置文件
+- **AI**：OpenAI-compatible API，可配置 base URL、model 和 API key
 
-## 本地开发
+## 快速开始
 
 ### 环境要求
 
 - Python 3.12+
-- Node.js 18+
+- Node.js 20+
 - npm
 
-### 1. 安装 Python 依赖
+### 1. 安装后端依赖
 
 ```bash
 python3 -m venv .venv
@@ -60,13 +104,13 @@ source .venv/bin/activate
 pip install -r requirements_api.txt
 ```
 
-如果你还需要旧分析链路的额外依赖：
+如果你还需要运行旧分析链路或更多本地分析能力，可以额外安装：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 安装 Node 依赖
+### 2. 安装前端依赖
 
 ```bash
 npm install
@@ -74,7 +118,7 @@ npm install
 
 ### 3. 配置环境变量
 
-在项目根目录创建 `.env`，至少配置：
+在项目根目录创建 `.env`：
 
 ```env
 LLM_API_KEY=your_api_key
@@ -84,50 +128,87 @@ MONITOR_DB_PATH=./data/monitor.db
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-### 4. 启动后端
+可选：如果你要公开演示并保护部分页面，可以配置演示访问码：
+
+```env
+DEMO_ACCESS_CODE=your_demo_code
+DEMO_ACCESS_SECRET=your_cookie_signing_secret
+```
+
+### 4. 启动 API
 
 ```bash
 ./scripts/run_api.sh
 ```
 
-默认地址：`http://127.0.0.1:8000`
+默认后端地址：`http://127.0.0.1:8000`
 
 ### 5. 启动前端
-
-另开一个终端：
 
 ```bash
 npm run dev
 ```
 
-默认地址：`http://127.0.0.1:3000`
+默认前端地址：`http://127.0.0.1:3000`
 
 ## 项目结构
 
-- `api/`：FastAPI 入口、schema 和服务层
-- `app/`：Next.js App Router 页面与路由
-- `components/`：前端公共组件
-- `lib/`：前端 API 客户端与共享类型
-- `ashare/`：分析引擎、监控和数据模块
-- `scripts/`：本地运行辅助脚本
+```text
+.
+├── api/          # FastAPI 入口、schemas、SSE 与服务编排
+├── app/          # Next.js App Router 页面
+├── components/   # 前端 UI 组件
+├── lib/          # 前端 API client、共享类型和工具
+├── ashare/       # 分析引擎、行情搜索、监控与数据模块
+├── scripts/      # 本地启动脚本
+├── tests/        # API 与搜索相关测试
+└── assets/       # 截图、样式、报告模板等资源
+```
 
-## 验证方式
+## API 与页面概览
+
+- `/dashboard`：一站式研究工作台
+- `/stocks`：股票搜索与单股分析
+- `/news`：市场消息与个股新闻
+- `/hotspots`：热点主题与关联标的
+- `/portfolio`：持仓组合与风险分析
+- `/work`：策略观察与复盘
+- `/agent`：Agent 研究对话
+- `/settings`：模型与服务配置
+
+## 验证
 
 ```bash
 python -m pytest tests/test_api_app.py -q
 npm run build
 ```
 
+## 适合谁
+
+- 想搭一个私有 A 股研究工作台的个人开发者
+- 想把 AI Agent 接入真实金融研究流程的工程师
+- 想研究 FastAPI + Next.js 全栈项目结构的学习者
+- 想在本地组合、新闻、热点和策略之间建立闭环的投资研究爱好者
+
+## Roadmap 灵感
+
+- 更多数据源适配与缓存策略
+- 回测、交易日历与策略绩效面板
+- 更细颗粒度的 Agent 工具调用与引用追踪
+- 多用户权限、团队共享和部署模板
+- 更完整的测试覆盖与 CI workflow
+
 ## 贡献
 
-欢迎提交 Issue 和 Pull Request。请尽量保持改动聚焦，避免不必要的大范围重构，并尽量保留当前产品形态：
+欢迎 Issue、Discussion 和 Pull Request。为了保持项目清爽，建议贡献时遵循：
 
-- 单股分析
-- 新闻
-- 热点
-- 持仓
-- Agent 问答
+- 优先提交小而聚焦的改动
+- API contract 变更时同步更新 `api/schemas.py` 与 `lib/types.ts`
+- 不提交真实 API key、私有配置或机器本地文件
+- 尽量保留项目主线：股票分析、新闻、热点、持仓、策略和 Agent 对话
 
-## 许可
+如果这个项目对你有启发，欢迎 Star。它会让这个小小的 A 股研究台更容易被同路人发现。
 
-MIT License
+## License
+
+[MIT](LICENSE)

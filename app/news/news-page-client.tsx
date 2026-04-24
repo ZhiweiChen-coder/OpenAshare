@@ -10,6 +10,12 @@ type SummarySection = {
   title: string;
   bullets: string[];
   paragraphs: string[];
+  table?: SummaryTable | null;
+};
+
+type SummaryTable = {
+  headers: string[];
+  rows: string[][];
 };
 
 type AgentSummary = {
@@ -21,7 +27,7 @@ type AgentSummary = {
 type BlockStatus = "idle" | "loading" | "ok" | "error";
 
 const AGENT_PROMPT = "今日全球热点和科技大事是什么";
-const AGENT_TIMEOUT_MS = 90_000;
+const AGENT_TIMEOUT_MS = 25_000;
 
 export function NewsPageClient() {
   const { loaded, unlocked } = useDemoAccess();
@@ -76,7 +82,7 @@ export function NewsPageClient() {
 
     setAgentProgress("正在整理今日重点...");
 
-    queryAgent(AGENT_PROMPT)
+    queryAgent(AGENT_PROMPT, [], undefined, { signal: controller.signal, timeoutMs: AGENT_TIMEOUT_MS })
       .then((response) => {
         setAgentResponse({
           intent: response.intent,
@@ -228,6 +234,28 @@ export function NewsPageClient() {
                             <li key={bullet}>{bullet}</li>
                           ))}
                         </ul>
+                      ) : null}
+                      {section.table ? (
+                        <div className="summary-table-wrap">
+                          <table className="summary-table">
+                            <thead>
+                              <tr>
+                                {section.table.headers.map((header) => (
+                                  <th key={header}>{header}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {section.table.rows.map((row, rowIndex) => (
+                                <tr key={`${section.title}-row-${rowIndex}`}>
+                                  {section.table?.headers.map((header, cellIndex) => (
+                                    <td key={`${header}-${cellIndex}`}>{row[cellIndex] ?? ""}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       ) : null}
                     </article>
                   ))}
@@ -518,6 +546,14 @@ function parseSummarySections(summary?: string | null): SummarySection[] {
 
   const sections: SummarySection[] = [];
   let current: SummarySection | null = null;
+  let pendingTableHeader: string[] | null = null;
+
+  const ensureCurrent = () => {
+    if (!current) {
+      current = { title: "总体概览", bullets: [], paragraphs: [], table: null };
+    }
+    return current;
+  };
 
   cleaned.split("\n").forEach((rawLine) => {
     const line = rawLine.trim();
@@ -533,24 +569,45 @@ function parseSummarySections(summary?: string | null): SummarySection[] {
         title: line.replace(/^##+\s*/, "").trim() || "重点",
         bullets: [],
         paragraphs: [],
+        table: null,
       };
+      pendingTableHeader = null;
       return;
     }
 
-    const normalized = cleanSummaryLine(line.replace(/^[-*]\s*/, "").trim());
-    if (!current) {
-      current = { title: "总体概览", bullets: [], paragraphs: [] };
+    const tableCells = parseMarkdownTableRow(line);
+    if (tableCells) {
+      const section = ensureCurrent();
+      if (isMarkdownTableDivider(tableCells)) {
+        return;
+      }
+      if (!pendingTableHeader) {
+        pendingTableHeader = tableCells;
+        return;
+      }
+      if (!section.table) {
+        section.table = {
+          headers: pendingTableHeader,
+          rows: [],
+        };
+      }
+      section.table.rows.push(tableCells);
+      return;
     }
+    pendingTableHeader = null;
+
+    const normalized = cleanSummaryLine(line.replace(/^[-*]\s*/, "").trim());
+    const section = ensureCurrent();
 
     if (/^[-*]\s+/.test(line)) {
       if (normalized) {
-        current.bullets.push(normalized);
+        section.bullets.push(normalized);
       }
       return;
     }
 
     if (normalized) {
-      current.paragraphs.push(normalized);
+      section.paragraphs.push(normalized);
     }
   });
 
@@ -597,6 +654,22 @@ function cleanSummaryLine(value: string) {
     .trim();
 }
 
+function parseMarkdownTableRow(line: string) {
+  if (!line.startsWith("|") || !line.endsWith("|")) {
+    return null;
+  }
+  const cells = line
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cleanSummaryLine(cell))
+    .filter(Boolean);
+  return cells.length >= 2 ? cells : null;
+}
+
+function isMarkdownTableDivider(cells: string[]) {
+  return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, "")));
+}
+
 function dedupeSummarySections(sections: SummarySection[]) {
   const seen = new Set<string>();
 
@@ -625,7 +698,8 @@ function dedupeSummarySections(sections: SummarySection[]) {
         title: cleanSummaryLine(section.title),
         paragraphs,
         bullets,
+        table: section.table && section.table.rows.length ? section.table : null,
       };
     })
-    .filter((section) => section.title || section.paragraphs.length || section.bullets.length);
+    .filter((section) => section.title || section.paragraphs.length || section.bullets.length || section.table);
 }

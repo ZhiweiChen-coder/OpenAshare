@@ -1,24 +1,28 @@
-import Link from "next/link";
+import dynamic from "next/dynamic";
 import { cookies } from "next/headers";
+
 import { DemoAccessGate } from "@/components/demo-access-gate";
+import { HotspotPreviewPanel } from "@/components/hotspot-preview-panel";
+import { ResearchPulse } from "@/components/research-pulse";
 import { SearchForm } from "@/components/search-form";
-import { getHotspots, getPortfolioAnalysis } from "@/lib/api";
+
+const PortfolioSnapshotPanel = dynamic(
+  () => import("@/components/portfolio-snapshot-panel").then((m) => m.PortfolioSnapshotPanel),
+  {
+    loading: () => (
+      <div className="panel section">
+        <h2>组合快照</h2>
+        <p className="muted">正在加载组合快照...</p>
+      </div>
+    ),
+  },
+);
 import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
 import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
-  const cookieHeader = cookieStore
-    .getAll()
-    .map((entry) => `${entry.name}=${entry.value}`)
-    .join("; ");
   const demoAccess = getDemoAccessStatusFromToken(cookieStore.get(DEMO_ACCESS_COOKIE_NAME)?.value);
-  const [hotspots, portfolio] = await Promise.all([
-    getHotspots().catch(() => []),
-    demoAccess.unlocked
-      ? getPortfolioAnalysis({ requestInit: { headers: { cookie: cookieHeader } } }).catch(() => null)
-      : Promise.resolve(null),
-  ]);
 
   return (
     <>
@@ -44,73 +48,23 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="panel section">
-          <h2>组合快照</h2>
+        <div className="work-side-stack">
+          <ResearchPulse />
           {!demoAccess.unlocked ? (
-            <DemoAccessGate
-              title="组合快照已锁定"
-              description="解锁后可以看到组合分析、持仓风险和调仓建议。"
-            />
-          ) : portfolio ? (
-            <div className="metric-grid">
-              <div className="card">
-                <div className="muted">总市值</div>
-                <strong>{portfolio.total_market_value.toFixed(2)}</strong>
-              </div>
-              <div className="card">
-                <div className="muted">总盈亏</div>
-                <strong className={portfolio.total_pnl >= 0 ? "signal-up" : "signal-down"}>
-                  {portfolio.total_pnl.toFixed(2)}
-                </strong>
-              </div>
-              <div className="card">
-                <div className="muted">收益率</div>
-                <strong>{portfolio.total_pnl_pct.toFixed(2)}%</strong>
-              </div>
-              <div className="card">
-                <div className="muted">技术风险</div>
-                <strong>{portfolio.technical_risk}</strong>
-              </div>
+            <div className="panel section">
+              <h2>组合快照</h2>
+              <DemoAccessGate
+                title="组合快照已锁定"
+                description="解锁后可以看到组合分析、持仓风险和调仓建议。"
+              />
             </div>
           ) : (
-            <p className="muted">后端不可达时，这里会显示组合快照。</p>
+            <PortfolioSnapshotPanel />
           )}
         </div>
       </section>
 
-      <section className="panel section">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
-          <div>
-            <h2>今日热点</h2>
-            <p className="muted">来自板块关键词、告警和消息催化的聚合结果。</p>
-          </div>
-          <Link href="/hotspots" className="button secondary">
-            查看全部热点
-          </Link>
-        </div>
-        <div className="news-grid">
-          {hotspots.length ? (
-            hotspots.slice(0, 6).map((hotspot) => (
-              <div className="card" key={hotspot.topic_name}>
-                <div className="pill">热度 {hotspot.heat_score.toFixed(0)}</div>
-                <h3 style={{ marginTop: 12 }}>{hotspot.topic_name}</h3>
-                <p className="muted">{hotspot.reason}</p>
-                <div className="tag-list">
-                  {hotspot.related_stocks.slice(0, 3).map((stock) => (
-                    <span className="tag" key={`${hotspot.topic_name}-${stock.stock_code}`}>
-                      {stock.stock_name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="card">
-              <p className="muted">暂无热点数据，启动后端后会在这里展示。</p>
-            </div>
-          )}
-        </div>
-      </section>
+      <HotspotPreviewPanel />
     </>
   );
 }

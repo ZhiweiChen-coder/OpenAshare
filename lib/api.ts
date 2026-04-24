@@ -5,9 +5,13 @@ import {
   GlobalNewsItem,
   HotspotDetailResponse,
   HotspotItem,
+  MarketRegimeResponse,
   NewsItem,
   PortfolioAnalysisResponse,
   PortfolioPosition,
+  StrategyHolding,
+  StrategyHoldingAnalysisResponse,
+  StrategyScreenResponse,
   StockAnalysisResponse,
   StockSearchResult,
   UserSettingsResponse,
@@ -51,17 +55,60 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const raw = await response.text();
     let detail = raw;
     try {
-      const parsed = JSON.parse(raw) as { detail?: string; message?: string };
-      detail = parsed.detail || parsed.message || raw;
+      const parsed = JSON.parse(raw) as { detail?: unknown; message?: unknown };
+      detail = formatApiErrorDetail(parsed.detail ?? parsed.message ?? raw);
     } catch {
       // keep raw body
     }
-    throw new ApiError(detail || `API request failed: ${response.status}`, response.status);
+    throw new ApiError(String(detail || `API request failed: ${response.status}`), response.status);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return response.json() as Promise<T>;
+}
+
+async function requestWithTimeout<T>(path: string, timeoutMs: number, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  let raceTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  const originalSignal = init?.signal;
+
+  if (originalSignal) {
+    if (originalSignal.aborted) {
+      controller.abort();
+    } else {
+      originalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+  }
+
+  try {
+    return await Promise.race([
+      request<T>(path, {
+        ...init,
+        signal: controller.signal,
+      }),
+      new Promise<T>((_, reject) => {
+        raceTimeoutId = setTimeout(() => {
+          reject(new Error(`请求超时（>${Math.round(timeoutMs / 1000)}s）`));
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if ((error instanceof DOMException && error.name === "AbortError") || timedOut) {
+      throw new Error(`请求超时（>${Math.round(timeoutMs / 1000)}s）`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    if (raceTimeoutId) {
+      clearTimeout(raceTimeoutId);
+    }
+  }
 }
 
 export class ApiError extends Error {
@@ -72,6 +119,94 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.status = status;
   }
+}
+
+/** Readable text for caught errors in client UI (never "[object Object]"). */
+export function getClientErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "未知错误";
+    }
+  }
+  return String(error);
+}
+
+function safeJsonSnippet(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+  } catch {
+    return describeUnknownRecord(value);
+  }
+}
+
+function describeUnknownRecord(value: unknown): string {
+  if (!value || typeof value !== "object") {
+    return String(value);
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (!keys.length) {
+    return "（空对象）";
+  }
+  return keys
+    .slice(0, 12)
+    .map((key) => {
+      const v = record[key];
+      if (v === null || v === undefined) {
+        return `${key}: null`;
+      }
+      const t = typeof v;
+      if (t === "string" || t === "number" || t === "boolean") {
+        return `${key}: ${String(v)}`;
+      }
+      return `${key}: …`;
+    })
+    .join("; ");
+}
+
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const items = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return String(item);
+        }
+        const entry = item as { loc?: unknown; msg?: unknown; type?: unknown };
+        const location = Array.isArray(entry.loc)
+          ? entry.loc
+              .filter((part) => typeof part === "string" || typeof part === "number")
+              .join(".")
+          : "";
+        const message = typeof entry.msg === "string" ? entry.msg : "";
+        if (location && message) {
+          return `${location}: ${message}`;
+        }
+        if (message) {
+          return message;
+        }
+        return safeJsonSnippet(item);
+      })
+      .filter(Boolean);
+    return items.join("；") || "请求参数校验失败";
+  }
+  if (detail && typeof detail === "object") {
+    return safeJsonSnippet(detail);
+  }
+  return String(detail);
 }
 
 export function searchStocks(query: string): Promise<StockSearchResult[]> {
@@ -114,11 +249,11 @@ export function getStockAnalysisProgress(requestId: string): Promise<AnalysisPro
 }
 
 export function getHotspots(): Promise<HotspotItem[]> {
-  return request("/api/hotspots");
+  return requestWithTimeout("/api/hotspots", 5000);
 }
 
 export function getGlobalNews(): Promise<GlobalNewsItem[]> {
-  return request("/api/news/global");
+  return requestWithTimeout("/api/news/global", 6000);
 }
 
 export function webSearch(query: string, limit = 8): Promise<WebSearchResult[]> {
@@ -126,7 +261,11 @@ export function webSearch(query: string, limit = 8): Promise<WebSearchResult[]> 
 }
 
 export function getHotspotDetail(topic: string): Promise<HotspotDetailResponse> {
-  return request(`/api/hotspots/${encodeURIComponent(topic)}`);
+  return requestWithTimeout(`/api/hotspots/${encodeURIComponent(topic)}`, 5000);
+}
+
+export function getMarketRegime(options?: { requestInit?: RequestInit }): Promise<MarketRegimeResponse> {
+  return requestWithTimeout("/api/market-regime", 4000, options?.requestInit);
 }
 
 export function getPortfolioAnalysis(options?: { requestInit?: RequestInit }): Promise<PortfolioAnalysisResponse> {
@@ -175,6 +314,62 @@ export async function deletePortfolioPosition(id: number): Promise<void> {
   });
 }
 
+export function getCanSlimScreen(options?: {
+  scope?: "hotspot" | "market";
+  topic?: string;
+  limit?: number;
+  requestInit?: RequestInit;
+}): Promise<StrategyScreenResponse> {
+  const params = new URLSearchParams();
+  params.set("scope", options?.scope ?? "hotspot");
+  if (options?.topic) {
+    params.set("topic", options.topic);
+  }
+  if (options?.limit) {
+    params.set("limit", String(options.limit));
+  }
+  return requestWithTimeout(`/api/strategies/can-slim/screen?${params.toString()}`, 7000, options?.requestInit);
+}
+
+export function listStrategyHoldings(options?: { requestInit?: RequestInit }): Promise<StrategyHolding[]> {
+  return request("/api/strategy-holdings", options?.requestInit);
+}
+
+export function createStrategyHolding(payload: StrategyHolding): Promise<StrategyHolding> {
+  return request("/api/strategy-holdings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateStrategyHolding(id: number, payload: StrategyHolding): Promise<StrategyHolding> {
+  return request(`/api/strategy-holdings/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteStrategyHolding(id: number): Promise<void> {
+  await request(`/api/strategy-holdings/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function getStrategyHoldingsAnalysis(options?: {
+  requestInit?: RequestInit;
+}): Promise<StrategyHoldingAnalysisResponse> {
+  return requestWithTimeout("/api/strategy-holdings/analysis", 8000, options?.requestInit);
+}
+
+export function refreshStrategyHoldings(options?: {
+  requestInit?: RequestInit;
+}): Promise<StrategyHoldingAnalysisResponse> {
+  return request("/api/strategy-holdings/refresh", {
+    method: "POST",
+    ...(options?.requestInit ?? {}),
+  });
+}
+
 /**
  * Agent goes through Next.js Route Handler POST /api/agent/query (app/api/agent/query/route.ts).
  * That handler proxies to FastAPI with a long timeout — avoids browser CORS to :8000 and
@@ -182,9 +377,22 @@ export async function deletePortfolioPosition(id: number): Promise<void> {
  */
 const AGENT_REQUEST_TIMEOUT_MS = 130_000; // slightly longer than server proxy timeout
 
-export async function queryAgent(query: string, history: AgentHistoryTurn[] = [], sessionId?: string): Promise<AgentResponse> {
+export async function queryAgent(
+  query: string,
+  history: AgentHistoryTurn[] = [],
+  sessionId?: string,
+  options?: { signal?: AbortSignal; timeoutMs?: number },
+): Promise<AgentResponse> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), AGENT_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), options?.timeoutMs ?? AGENT_REQUEST_TIMEOUT_MS);
+  const originalSignal = options?.signal;
+  if (originalSignal) {
+    if (originalSignal.aborted) {
+      controller.abort(originalSignal.reason);
+    } else {
+      originalSignal.addEventListener("abort", () => controller.abort(originalSignal.reason), { once: true });
+    }
+  }
   try {
     const response = await fetch("/api/agent/query", {
       method: "POST",

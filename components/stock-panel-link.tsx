@@ -29,13 +29,6 @@ export function StockPanelLink({ stockCode, panel, className, children }: StockP
     return () => window.clearInterval(timer);
   }, [isNavigating, openingSteps, panel]);
 
-  useEffect(() => {
-    if (panel !== "ai" && panel !== "news") {
-      return;
-    }
-    router.prefetch(`/stocks?query=${encodeURIComponent(stockCode)}&panel=${panel}`);
-  }, [panel, router, stockCode]);
-
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (panel !== "ai" && panel !== "news") {
       return;
@@ -52,6 +45,7 @@ export function StockPanelLink({ stockCode, panel, className, children }: StockP
   return (
     <Link
       href={fallbackHref}
+      prefetch={false}
       className={`${className ?? ""}${isNavigating ? " is-loading is-loading-steps" : ""}`}
       onClick={handleClick}
       aria-busy={isNavigating}

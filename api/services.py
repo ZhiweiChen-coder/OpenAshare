@@ -4,7 +4,7 @@ import copy
 import sqlite3
 import time
 import re
-from threading import Lock
+from threading import Lock, Thread
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
@@ -19,8 +19,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from api.schemas import (
-    AnalysisProgressResponse,
     AIInsight,
+    AnalysisProgressResponse,
     AgentResponse,
     AgentHistoryTurn,
     GlobalNewsItem,
@@ -28,12 +28,22 @@ from api.schemas import (
     HotspotHistoryPoint,
     HotspotItem,
     HotspotRelatedStock,
+    MarketIndexSnapshot,
+    MarketRegimeResponse,
     NewsItem,
     PortfolioAnalysisResponse,
     PortfolioPosition,
     PositionAnalysis,
     QuoteSnapshot,
     SignalSummary,
+    StrategyCandidate,
+    StrategyHolding,
+    StrategyHoldingAnalysis,
+    StrategyHoldingAnalysisResponse,
+    StrategyReviewItem,
+    StrategyScoreBreakdown,
+    StrategyScreenResponse,
+    StrategyTodoItem,
     StockAnalysisResponse,
     StockSearchResult,
     WebSearchResult,
@@ -44,7 +54,15 @@ from ashare.config import Config, PROJECT_ROOT
 from ashare.monitor import HkHotRankTracker, MonitorStateStore, NewsTracker, normalize_text
 from ashare.search import stock_searcher
 from ashare.signals import SignalAnalyzer
-from ashare.stock_pool import infer_market, load_stock_pool, load_stock_topics, normalize_stock_code
+from ashare.stock_pool import (
+    extract_symbol,
+    get_base_stock_catalog,
+    infer_market,
+    is_a_share_individual_stock,
+    load_stock_pool,
+    load_stock_topics,
+    normalize_stock_code,
+)
 
 ProgressCallback = Callable[[str, int, str, Optional[Dict[str, Any]]], None]
 
@@ -116,9 +134,60 @@ GLOBAL_TOPIC_RULES: List[Dict[str, Any]] = [
     },
 ]
 
+_NEWS_DIGEST_HEAD_PATTERN = re.compile(r"主要内容\s*有\s*[:：]\s*1\.")
+
+
+def _is_domestic_news_digest(title: str, summary: str) -> bool:
+    """Long-form CCTV / bulletin headlines: classify by lead story, not trailing intl items."""
+    blob = f"{title} {summary}".lower()
+    if "新闻联播" in blob:
+        return True
+    combined = f"{title} {summary}"
+    return bool(_NEWS_DIGEST_HEAD_PATTERN.search(combined))
+
+
+def _extract_primary_digest_line(text: str) -> Optional[str]:
+    """First numbered item after a digest header (e.g. 1.【栏目】要点；)."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    m = re.search(r"1\.\s*【([^】]+)】\s*([^；]+?)(?=；|$)", t)
+    if m:
+        head, tail = m.group(1).strip(), m.group(2).strip()
+        pick = tail if len(tail) >= 4 else head
+        pick = re.sub(r"\s+", " ", pick).strip()
+        return pick or None
+    m2 = re.search(r"1\.\s*([^；]+?)(?=；|$)", t)
+    if m2:
+        return re.sub(r"\s+", " ", m2.group(1).strip())
+    return None
+
+
+def _short_digest_topic_label(value: str, max_len: int = 32) -> str:
+    v = value.strip()
+    if len(v) <= max_len:
+        return v
+    return v[: max_len - 1].rstrip() + "…"
+
+
 HOTSPOT_SECTOR_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "科技": {
-        "aliases": ["科技", "ai", "人工智能", "算力", "芯片", "半导体", "云", "cloud", "openai", "nvidia", "amazon", "microsoft"],
+        "aliases": [
+            "科技",
+            "ai",
+            "人工智能",
+            "算力",
+            "芯片",
+            "半导体",
+            "云",
+            "cloud",
+            "openai",
+            "nvidia",
+            "amazon",
+            "microsoft",
+            "数字中国",
+            "数字经济",
+        ],
         "categories": ["科技", "通信"],
     },
     "金融": {
@@ -160,6 +229,13 @@ STOCK_NAME_ALIASES: Dict[str, str] = {
     "中国石油天然气": "中国石油",
     "中国石油化工": "中国石化",
 }
+
+MARKET_REGIME_INDEXES: List[Tuple[str, str]] = [
+    ("sh000001", "上证指数"),
+    ("sh000300", "沪深300"),
+    ("sz399001", "深证成指"),
+    ("sz399006", "创业板指"),
+]
 
 
 @dataclass
@@ -553,6 +629,17 @@ class NewsService:
         self.tracker = NewsTracker(self.config)
         self._response_cache = TTLCacheStore()
 
+    @staticmethod
+    def _call_with_timeout(factory: Callable[[], Any], timeout_sec: float) -> Any:
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(factory)
+            return future.result(timeout=timeout_sec)
+        except (FuturesTimeout, Exception):
+            return None
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
     def get_stock_news(self, stock_code: str, stock_name: Optional[str] = None, limit: int = 20) -> List[NewsItem]:
         normalized = normalize_stock_code(stock_code)
         search_info = stock_searcher.get_stock_info(normalized)
@@ -598,10 +685,7 @@ class NewsService:
         ]
 
         for source_name, fetch_fn in sources:
-            try:
-                data_frame = fetch_fn()
-            except Exception:
-                data_frame = None
+            data_frame = self._call_with_timeout(fetch_fn, timeout_sec=2.5)
             try:
                 records.extend(self._normalize_global_news_dataframe(data_frame, source_name))
             except Exception:
@@ -767,15 +851,23 @@ class NewsService:
 
     def _classify_global_topic(self, title: str, summary: str, source_name: str) -> Dict[str, Any]:
         haystack = f"{title} {summary}".lower()
-        best_rule = {"topic": "全球市场动态", "category": "general", "region": "global"}
-        best_score = 0
+        default_rule = {"topic": "全球市场动态", "category": "general", "region": "global"}
 
-        for rule in GLOBAL_TOPIC_RULES:
-            score = sum(2 for token in rule["keywords"] if token in haystack)
-            score += sum(3 for token in rule["major_keywords"] if token in haystack)
-            if score > best_score:
-                best_score = score
-                best_rule = rule
+        if _is_domestic_news_digest(title, summary):
+            primary = _extract_primary_digest_line(title) or _extract_primary_digest_line(summary)
+            label = _short_digest_topic_label(primary) if primary else ""
+            topic_label = f"国内时政 · {label}" if label else "国内时政与产业要闻"
+            best_rule = {"topic": topic_label, "category": "domestic", "region": "asia"}
+            best_score = 100
+        else:
+            best_rule = default_rule
+            best_score = 0
+            for rule in GLOBAL_TOPIC_RULES:
+                score = sum(2 for token in rule["keywords"] if token in haystack)
+                score += sum(3 for token in rule["major_keywords"] if token in haystack)
+                if score > best_score:
+                    best_score = score
+                    best_rule = rule
 
         impact_level = 2
         if any(token in haystack for token in ["breaking", "突发", "订单", "战争", "停火", "制裁", "加息", "降息"]):
@@ -960,13 +1052,15 @@ class HotspotService:
 
     def _fetch_hk_rankings_with_timeout(self, timeout_sec: float = 4.0) -> List[Dict[str, Any]]:
         global _HK_RANK_DISABLED_UNTIL
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            with ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(self.hk_tracker.fetch_hot_rankings)
-                return fut.result(timeout=timeout_sec)[:10]
+            fut = executor.submit(self.hk_tracker.fetch_hot_rankings)
+            return fut.result(timeout=timeout_sec)[:10]
         except (FuturesTimeout, Exception):
             _HK_RANK_DISABLED_UNTIL = time.monotonic() + _HK_RANK_COOLDOWN_SEC
             return []
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _build_sector_map(self) -> Dict[str, Dict[str, Any]]:
         stock_pool = load_stock_pool(self.config.stock_pool_path)
@@ -978,6 +1072,8 @@ class HotspotService:
                 sector_name,
                 {
                     "keywords": {sector_name.lower()},
+                    "stock_codes": set(),
+                    "stock_names": set(),
                     "stocks": [],
                 },
             )
@@ -991,6 +1087,8 @@ class HotspotService:
                     continue
                 sector["keywords"].add(stock_name.lower())
                 sector["keywords"].add(stock_code.lower())
+                sector["stock_names"].add(stock_name.lower())
+                sector["stock_codes"].add(stock_code.lower())
                 sector["stocks"].append(
                     HotspotRelatedStock(
                         stock_name=stock_name,
@@ -1009,11 +1107,15 @@ class HotspotService:
                     sector_name,
                     {
                         "keywords": {sector_name.lower()},
+                        "stock_codes": set(),
+                        "stock_names": set(),
                         "stocks": [],
                     },
                 )
                 sector["keywords"].add(stock_name.lower())
                 sector["keywords"].add(stock_code.lower())
+                sector["stock_names"].add(stock_name.lower())
+                sector["stock_codes"].add(stock_code.lower())
                 sector["stocks"].append(
                     HotspotRelatedStock(
                         stock_name=stock_name,
@@ -1023,6 +1125,38 @@ class HotspotService:
                 )
 
         return sectors
+
+    @staticmethod
+    def _stock_belongs_to_sector(stock: HotspotRelatedStock, sector: Dict[str, Any]) -> bool:
+        code = normalize_stock_code(stock.stock_code).lower()
+        name = stock.stock_name.lower().strip()
+        if code and code in sector.get("stock_codes", set()):
+            return True
+        if name and name in sector.get("stock_names", set()):
+            return True
+        return False
+
+    def _filter_related_stocks_for_sector(
+        self,
+        stocks: List[HotspotRelatedStock],
+        sector: Dict[str, Any],
+        limit: int = 5,
+    ) -> List[HotspotRelatedStock]:
+        filtered = [stock for stock in stocks if self._stock_belongs_to_sector(stock, sector)]
+        if len(filtered) < limit:
+            known_codes = {normalize_stock_code(stock.stock_code).lower() for stock in filtered}
+            known_names = {self._canonical_stock_name(stock.stock_name) for stock in filtered if stock.stock_name}
+            for stock in sector.get("stocks", []):
+                code = normalize_stock_code(stock.stock_code).lower()
+                name = self._canonical_stock_name(stock.stock_name)
+                if code and code not in known_codes and (not name or name not in known_names):
+                    filtered.append(stock)
+                    known_codes.add(code)
+                    if name:
+                        known_names.add(name)
+                if len(filtered) >= limit:
+                    break
+        return self._dedupe_related_stocks(filtered, limit=limit)
 
     @staticmethod
     def _canonical_hotspot_name(name: str) -> str:
@@ -1035,14 +1169,24 @@ class HotspotService:
         return name.strip()
 
     @staticmethod
+    def _canonical_stock_name(value: str) -> str:
+        name = value.strip()
+        return STOCK_NAME_ALIASES.get(name, name).lower()
+
+    @staticmethod
     def _dedupe_related_stocks(stocks: List[HotspotRelatedStock], limit: int = 5) -> List[HotspotRelatedStock]:
         deduped: List[HotspotRelatedStock] = []
         seen_codes = set()
+        seen_names = set()
         for stock in stocks:
-            if not stock.stock_code or stock.stock_code in seen_codes:
+            stock_code = normalize_stock_code(stock.stock_code).lower()
+            stock_name = HotspotService._canonical_stock_name(stock.stock_name)
+            if not stock_code or stock_code in seen_codes or (stock_name and stock_name in seen_names):
                 continue
             deduped.append(stock)
-            seen_codes.add(stock.stock_code)
+            seen_codes.add(stock_code)
+            if stock_name:
+                seen_names.add(stock_name)
             if len(deduped) >= limit:
                 break
         return deduped
@@ -1121,14 +1265,13 @@ class HotspotService:
         items: List[HotspotItem] = []
         build_limit = max(limit, 50)
         for topic_name, score in topic_counter.most_common(build_limit):
-            related_stocks = self._dedupe_related_stocks(topic_stocks[topic_name], limit=5)
-            if not related_stocks:
-                sector = sectors.get(topic_name)
-                if sector:
-                    related_stocks = self._dedupe_related_stocks(sector["stocks"], limit=5)
+            sector = sectors.get(topic_name)
+            if sector:
+                related_stocks = self._filter_related_stocks_for_sector(topic_stocks[topic_name], sector, limit=5)
+            else:
+                related_stocks = self._dedupe_related_stocks(topic_stocks[topic_name], limit=5)
             if not related_stocks or score <= 0:
                 continue
-            sector = sectors.get(topic_name, {"stocks": []})
             top_reason = next((item for item in topic_reasons[topic_name] if item), f"{topic_name} 相关消息密度提升")
             items.append(
                 HotspotItem(
@@ -1209,6 +1352,164 @@ class HotspotService:
         )
         self._response_cache.set(cache_key, response, 120)
         return response
+
+
+class MarketService:
+    def __init__(self, stock_service: StockAnalysisService):
+        self.stock_service = stock_service
+        self._response_cache = TTLCacheStore()
+        self._refresh_lock = Lock()
+        self._refresh_in_progress = False
+        self._last_response: Optional[MarketRegimeResponse] = None
+
+    def _build_index_snapshot(self, stock_code: str, stock_name: str) -> Optional[MarketIndexSnapshot]:
+        try:
+            analysis = self.stock_service.get_stock_analysis(stock_code, include_ai=False)
+        except Exception:
+            return None
+        current_price = analysis.quote.current_price
+        ma20 = analysis.technical_indicators.get("MA20") or current_price
+        ma60 = analysis.technical_indicators.get("MA60") or current_price
+        return MarketIndexSnapshot(
+            stock_code=analysis.stock_code,
+            stock_name=stock_name,
+            current_price=current_price,
+            change_pct=analysis.quote.change_pct,
+            above_ma20=bool(ma20 and current_price >= ma20),
+            above_ma60=bool(ma60 and current_price >= ma60),
+            trend_score=self._score_index_trend(
+                current_price=current_price,
+                change_pct=analysis.quote.change_pct,
+                ma20=ma20,
+                ma60=ma60,
+            ),
+        )
+
+    def _compute_market_regime(self) -> MarketRegimeResponse:
+        snapshots: List[MarketIndexSnapshot] = []
+        for stock_code, stock_name in MARKET_REGIME_INDEXES:
+            snapshot = self._build_index_snapshot(stock_code, stock_name)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+
+        if not snapshots:
+            return self._build_market_regime_fallback()
+
+        average_trend = sum(item.trend_score for item in snapshots) / len(snapshots)
+        above_ma20_ratio = sum(1 for item in snapshots if item.above_ma20) / len(snapshots)
+        above_ma60_ratio = sum(1 for item in snapshots if item.above_ma60) / len(snapshots)
+        positive_ratio = sum(1 for item in snapshots if item.change_pct >= 0) / len(snapshots)
+        score = average_trend
+        score += (above_ma20_ratio - 0.5) * 14
+        score += (above_ma60_ratio - 0.5) * 18
+        score += (positive_ratio - 0.5) * 10
+        score = round(max(0, min(score, 100)), 1)
+
+        if score >= 67:
+            regime = "risk_on"
+            action_bias = "允许跟随主线做多，优先做强趋势与热点核心。"
+            position_guidance = "建议总仓 50%-70%，单票初始仓位控制在 10%-15%。"
+            summary = "大盘处于偏进攻环境，可以做主线强势股，但仍需纪律止损。"
+        elif score <= 40:
+            regime = "risk_off"
+            action_bias = "市场偏防守，减少追高，优先控仓和处理弱势持仓。"
+            position_guidance = "建议总仓 0%-30%，新开仓尽量暂停，保留观察仓。"
+            summary = "大盘风险偏高，策略以防守和观察为主。"
+        else:
+            regime = "neutral"
+            action_bias = "市场仍在分歧中，只轻仓试错最强主题。"
+            position_guidance = "建议总仓 20%-40%，单票不超过 10%。"
+            summary = "大盘处于震荡环境，只有最强板块和最强个股值得出手。"
+
+        response = MarketRegimeResponse(
+            regime=regime,
+            score=score,
+            action_bias=action_bias,
+            position_guidance=position_guidance,
+            summary=summary,
+            notes=self._build_market_notes(snapshots, regime),
+            indices=snapshots,
+            updated_at=_now_utc(),
+        )
+        return response
+
+    def _start_background_refresh(self) -> None:
+        with self._refresh_lock:
+            if self._refresh_in_progress:
+                return
+            self._refresh_in_progress = True
+
+        def refresh() -> None:
+            try:
+                response = self._compute_market_regime()
+                self._last_response = response
+                self._response_cache.set("market_regime", response, 120)
+            finally:
+                with self._refresh_lock:
+                    self._refresh_in_progress = False
+
+        Thread(target=refresh, name="market-regime-refresh", daemon=True).start()
+
+    @staticmethod
+    def _build_market_regime_fallback() -> MarketRegimeResponse:
+        return MarketRegimeResponse(
+            regime="neutral",
+            score=50,
+            action_bias="指数数据正在后台刷新，先按中性环境处理。",
+            position_guidance="建议轻仓试错，单票控制在 10% 以内。",
+            summary="市场状态正在刷新中，页面先返回中性风控口径，避免行情源阻塞首屏。",
+            notes=["市场状态后台刷新中，避免激进加仓。"],
+            indices=[],
+            updated_at=_now_utc(),
+        )
+
+    def get_market_regime(self) -> MarketRegimeResponse:
+        cached = self._response_cache.get("market_regime")
+        if cached is not None:
+            return cached
+
+        self._start_background_refresh()
+        if self._last_response is not None:
+            return self._last_response
+        fallback = self._build_market_regime_fallback()
+        self._response_cache.set("market_regime", fallback, 20)
+        return fallback
+
+    @staticmethod
+    def _score_index_trend(
+        *,
+        current_price: float,
+        change_pct: float,
+        ma20: float,
+        ma60: float,
+    ) -> float:
+        score = 50.0
+        score += max(-15, min(change_pct * 3, 15))
+        score += 12 if current_price >= ma20 else -10
+        score += 18 if current_price >= ma60 else -16
+        score += 8 if ma20 >= ma60 else -6
+        return round(max(0, min(score, 100)), 1)
+
+    @staticmethod
+    def _build_market_notes(snapshots: List[MarketIndexSnapshot], regime: str) -> List[str]:
+        notes: List[str] = []
+        above_ma20_count = sum(1 for item in snapshots if item.above_ma20)
+        above_ma60_count = sum(1 for item in snapshots if item.above_ma60)
+        if above_ma20_count >= max(2, len(snapshots) - 1):
+            notes.append("主要指数大多站上 MA20，短线情绪仍有承接。")
+        else:
+            notes.append("主要指数多数仍在 MA20 下方，短线追涨要谨慎。")
+        if above_ma60_count >= max(2, len(snapshots) - 1):
+            notes.append("中期趋势仍保持稳定，可优先看强趋势主线。")
+        else:
+            notes.append("中期趋势并不牢靠，更适合轻仓试错或防守。")
+        if regime == "risk_on":
+            notes.append("可以优先跟踪热点龙头和突破结构。")
+        elif regime == "risk_off":
+            notes.append("弱势环境下先处理失效持仓，再考虑新机会。")
+        else:
+            notes.append("震荡市里只保留最强主题，不宜同时铺太多仓位。")
+        return notes[:3]
 
 
 class PortfolioStore:
@@ -1315,6 +1616,221 @@ class PortfolioStore:
             connection.execute("DELETE FROM portfolio_positions WHERE id = ?", (position_id,))
 
 
+class StrategyHoldingStore:
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = Path(db_path or PROJECT_ROOT / "data" / "portfolio.db")
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _init_db(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_holdings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    strategy_key TEXT NOT NULL,
+                    stock_code TEXT NOT NULL,
+                    stock_name TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    quantity REAL NOT NULL,
+                    entry_date TEXT,
+                    exit_price REAL,
+                    exit_date TEXT,
+                    notes TEXT,
+                    status TEXT NOT NULL DEFAULT 'holding',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(strategy_holdings)").fetchall()
+            }
+            if "exit_price" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN exit_price REAL")
+            if "exit_date" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN exit_date TEXT")
+            if "source_topic" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN source_topic TEXT")
+            if "plan_reason" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_reason TEXT")
+            if "plan_entry_trigger" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_entry_trigger TEXT")
+            if "plan_entry_zone" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_entry_zone TEXT")
+            if "plan_stop_loss" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_stop_loss REAL")
+            if "plan_take_profit" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_take_profit REAL")
+            if "plan_max_position_pct" not in columns:
+                connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_max_position_pct REAL")
+
+    def list_holdings(self) -> List[StrategyHolding]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    id, strategy_key, stock_code, stock_name, entry_price, quantity,
+                    entry_date, exit_price, exit_date, source_topic, plan_reason, plan_entry_trigger,
+                    plan_entry_zone, plan_stop_loss, plan_take_profit, plan_max_position_pct,
+                    notes, status, created_at, updated_at
+                FROM strategy_holdings
+                ORDER BY updated_at DESC, id DESC
+                """
+            ).fetchall()
+        return [StrategyHolding(**dict(row)) for row in rows]
+
+    def create_holding(self, holding: StrategyHolding) -> StrategyHolding:
+        now = _now_utc().isoformat()
+        entry_date = holding.entry_date or now[:10]
+        exit_price, exit_date = self._normalize_exit_fields(holding, now)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO strategy_holdings (
+                    strategy_key, stock_code, stock_name, entry_price, quantity,
+                    entry_date, exit_price, exit_date, source_topic, plan_reason, plan_entry_trigger,
+                    plan_entry_zone, plan_stop_loss, plan_take_profit, plan_max_position_pct,
+                    notes, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    holding.strategy_key,
+                    normalize_stock_code(holding.stock_code),
+                    holding.stock_name,
+                    holding.entry_price,
+                    holding.quantity,
+                    entry_date,
+                    exit_price,
+                    exit_date,
+                    holding.source_topic,
+                    holding.plan_reason,
+                    holding.plan_entry_trigger,
+                    holding.plan_entry_zone,
+                    holding.plan_stop_loss,
+                    holding.plan_take_profit,
+                    holding.plan_max_position_pct,
+                    holding.notes,
+                    holding.status,
+                    now,
+                    now,
+                ),
+            )
+            holding_id = cursor.lastrowid
+        return StrategyHolding(
+            id=holding_id,
+            strategy_key=holding.strategy_key,
+            stock_code=normalize_stock_code(holding.stock_code),
+            stock_name=holding.stock_name,
+            entry_price=holding.entry_price,
+            quantity=holding.quantity,
+            entry_date=entry_date,
+            exit_price=exit_price,
+            exit_date=exit_date,
+            source_topic=holding.source_topic,
+            plan_reason=holding.plan_reason,
+            plan_entry_trigger=holding.plan_entry_trigger,
+            plan_entry_zone=holding.plan_entry_zone,
+            plan_stop_loss=holding.plan_stop_loss,
+            plan_take_profit=holding.plan_take_profit,
+            plan_max_position_pct=holding.plan_max_position_pct,
+            notes=holding.notes,
+            status=holding.status,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_holding(self, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
+        now = _now_utc().isoformat()
+        entry_date = holding.entry_date or now[:10]
+        exit_price, exit_date = self._normalize_exit_fields(holding, now)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE strategy_holdings
+                SET strategy_key = ?, stock_code = ?, stock_name = ?, entry_price = ?,
+                    quantity = ?, entry_date = ?, exit_price = ?, exit_date = ?, source_topic = ?, plan_reason = ?,
+                    plan_entry_trigger = ?, plan_entry_zone = ?, plan_stop_loss = ?, plan_take_profit = ?,
+                    plan_max_position_pct = ?, notes = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    holding.strategy_key,
+                    normalize_stock_code(holding.stock_code),
+                    holding.stock_name,
+                    holding.entry_price,
+                    holding.quantity,
+                    entry_date,
+                    exit_price,
+                    exit_date,
+                    holding.source_topic,
+                    holding.plan_reason,
+                    holding.plan_entry_trigger,
+                    holding.plan_entry_zone,
+                    holding.plan_stop_loss,
+                    holding.plan_take_profit,
+                    holding.plan_max_position_pct,
+                    holding.notes,
+                    holding.status,
+                    now,
+                    holding_id,
+                ),
+            )
+        return StrategyHolding(
+            id=holding_id,
+            strategy_key=holding.strategy_key,
+            stock_code=normalize_stock_code(holding.stock_code),
+            stock_name=holding.stock_name,
+            entry_price=holding.entry_price,
+            quantity=holding.quantity,
+            entry_date=entry_date,
+            exit_price=exit_price,
+            exit_date=exit_date,
+            source_topic=holding.source_topic,
+            plan_reason=holding.plan_reason,
+            plan_entry_trigger=holding.plan_entry_trigger,
+            plan_entry_zone=holding.plan_entry_zone,
+            plan_stop_loss=holding.plan_stop_loss,
+            plan_take_profit=holding.plan_take_profit,
+            plan_max_position_pct=holding.plan_max_position_pct,
+            notes=holding.notes,
+            status=holding.status,
+            updated_at=now,
+        )
+
+    def get_holding(self, holding_id: int) -> Optional[StrategyHolding]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    id, strategy_key, stock_code, stock_name, entry_price, quantity,
+                    entry_date, exit_price, exit_date, source_topic, plan_reason, plan_entry_trigger,
+                    plan_entry_zone, plan_stop_loss, plan_take_profit, plan_max_position_pct,
+                    notes, status, created_at, updated_at
+                FROM strategy_holdings
+                WHERE id = ?
+                """,
+                (holding_id,),
+            ).fetchone()
+        return StrategyHolding(**dict(row)) if row else None
+
+    def delete_holding(self, holding_id: int) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM strategy_holdings WHERE id = ?", (holding_id,))
+
+    def _normalize_exit_fields(self, holding: StrategyHolding, now: str) -> Tuple[Optional[float], Optional[str]]:
+        if holding.status != "exited":
+            return None, None
+        exit_price = holding.exit_price if holding.exit_price is not None else holding.entry_price
+        exit_date = holding.exit_date or now[:10]
+        return exit_price, exit_date
+
+
 class PortfolioService:
     def __init__(self, config: Optional[Config] = None, store: Optional[PortfolioStore] = None):
         self.config = config or Config()
@@ -1403,6 +1919,720 @@ class PortfolioService:
         )
 
 
+class StrategyService:
+    def __init__(
+        self,
+        stock_service: StockAnalysisService,
+        news_service: NewsService,
+        hotspot_service: HotspotService,
+        market_service: Optional[MarketService] = None,
+        store: Optional[StrategyHoldingStore] = None,
+        portfolio_store: Optional[PortfolioStore] = None,
+    ):
+        self.stock_service = stock_service
+        self.news_service = news_service
+        self.hotspot_service = hotspot_service
+        self.market_service = market_service or MarketService(stock_service)
+        self.store = store or StrategyHoldingStore()
+        self.portfolio_store = portfolio_store or PortfolioStore()
+
+    def screen_can_slim(
+        self,
+        scope: str = "hotspot",
+        topic: Optional[str] = None,
+        limit: int = 8,
+    ) -> StrategyScreenResponse:
+        normalized_scope = "market" if scope == "market" else "hotspot"
+        candidates = self._build_candidates(normalized_scope, topic)
+        scored = [
+            self._score_candidate_quick(candidate, normalized_scope, topic)
+            for candidate in candidates[: max(limit * 2, limit)]
+        ]
+
+        scored.sort(key=lambda item: item.score.total, reverse=True)
+        return StrategyScreenResponse(
+            strategy_key="can_slim",
+            scope=normalized_scope,
+            topic=topic,
+            generated_at=_now_utc(),
+            candidates=scored[:limit],
+        )
+
+    def _score_candidate_quick(self, candidate: Dict[str, str], scope: str, topic: Optional[str]) -> StrategyCandidate:
+        code = normalize_stock_code(candidate["code"])
+        name = candidate["name"]
+        info = stock_searcher.base_stock_db.get(name, {})
+        category = str(info.get("category") or "")
+        is_hotspot = scope == "hotspot"
+        is_a_share = is_a_share_individual_stock(code)
+        category_bonus = 8 if topic and (topic in category or category in HOTSPOT_SECTOR_TEMPLATES.get(topic, {}).get("categories", [])) else 0
+        market_bonus = 6 if is_a_share else 2
+        base = 62 + (12 if is_hotspot else 4) + category_bonus + market_bonus
+        total = round(max(45, min(base, 86)), 1)
+        score = StrategyScoreBreakdown(
+            c=round(total - 4, 1),
+            a=round(total - 2, 1),
+            n=round(total + (4 if is_hotspot else 0), 1),
+            s=round(total - 6, 1),
+            l=round(total, 1),
+            i=round(total - 3, 1),
+            m=round(total + (3 if is_hotspot else 0), 1),
+            total=total,
+        )
+        return StrategyCandidate(
+            strategy_key="can_slim",
+            stock_code=code,
+            stock_name=name,
+            market=infer_market(code),
+            score=score,
+            factor_notes={
+                "c": "快速模式暂不拉取行情，按热点强度与板块归属估算当前动量。",
+                "a": "快速模式不阻塞页面，成长性需进入单股分析后确认。",
+                "n": f"{'来自热点主题，具备题材催化。' if is_hotspot else '按全市场候选池快速筛选。'}",
+                "s": "成交量与供需结构需在单股页进一步核验。",
+                "l": "领先性使用本地股票池与热点归属做代理判断。",
+                "i": "机构关注度未实时拉取，避免外部源阻塞页面。",
+                "m": "市场状态使用独立 Market Regime 卡片判断。",
+            },
+            reasons=[
+                f"该股来自“{topic}”热点主题。" if topic else "来自全市场快速候选池。",
+                "快速筛选优先保证页面响应，适合作为观察清单入口。",
+            ],
+            risks=[
+                "尚未拉取实时行情和均线结构，不能直接作为买卖依据。",
+                "请进入单股分析页确认量价、趋势和消息催化。",
+            ],
+            source_scope=scope,
+            source_topic=topic,
+            metadata={"mode": "quick", "category": category, "symbol": extract_symbol(code)},
+        )
+
+    def list_holdings(self) -> List[StrategyHolding]:
+        return self.store.list_holdings()
+
+    def create_holding(self, holding: StrategyHolding) -> StrategyHolding:
+        created = self.store.create_holding(holding)
+        self._sync_portfolio_position_for_code(created.stock_code)
+        return created
+
+    def update_holding(self, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
+        previous = self.store.get_holding(holding_id)
+        updated = self.store.update_holding(holding_id, holding)
+        codes_to_sync = {updated.stock_code}
+        if previous:
+            codes_to_sync.add(previous.stock_code)
+        for code in codes_to_sync:
+            self._sync_portfolio_position_for_code(code)
+        return updated
+
+    def delete_holding(self, holding_id: int) -> None:
+        previous = self.store.get_holding(holding_id)
+        self.store.delete_holding(holding_id)
+        if previous:
+            self._sync_portfolio_position_for_code(previous.stock_code)
+
+    def analyze_holdings(self) -> StrategyHoldingAnalysisResponse:
+        holdings = self.store.list_holdings()
+        if not holdings:
+            return StrategyHoldingAnalysisResponse(
+                total_cost=0,
+                total_market_value=0,
+                total_pnl=0,
+                total_pnl_pct=0,
+                total_realized_pnl=0,
+                holding_count=0,
+                active_count=0,
+                watching_count=0,
+                planned_count=0,
+                weakening_count=0,
+                exited_count=0,
+                invalidated_count=0,
+                win_rate_pct=0,
+                average_score=0,
+                todo_items=[],
+                review_items=[],
+                holdings=[],
+            )
+
+        try:
+            market_regime = self.market_service.get_market_regime()
+        except Exception:
+            market_regime = MarketRegimeResponse(
+                regime="neutral",
+                score=50,
+                action_bias="市场数据暂不可用，按中性环境处理。",
+                position_guidance="建议轻仓试错。",
+                summary="市场环境数据暂不可用。",
+                notes=[],
+                indices=[],
+                updated_at=_now_utc(),
+            )
+
+        analyses: List[StrategyHoldingAnalysis] = []
+        for holding in holdings:
+            try:
+                analyses.append(self._analyze_single_holding(holding, market_regime))
+            except Exception as exc:
+                analyses.append(self._build_unavailable_holding_analysis(holding, market_regime, exc))
+        total_cost = 0.0
+        total_market_value = 0.0
+        total_realized_pnl = 0.0
+        active_count = 0
+        watching_count = 0
+        planned_count = 0
+        weakening_count = 0
+        exited_count = 0
+        invalidated_count = 0
+        exited_win_count = 0
+        total_score = 0.0
+        for item in analyses:
+            cost = item.holding.entry_price * item.holding.quantity
+            if item.holding.status not in {"watching", "planned"}:
+                total_cost += cost
+                total_market_value += item.market_value
+                total_realized_pnl += item.realized_pnl
+            total_score += item.strategy_score.total
+            if item.holding.status == "holding":
+                active_count += 1
+            elif item.holding.status == "watching":
+                watching_count += 1
+            elif item.holding.status == "planned":
+                planned_count += 1
+            elif item.holding.status == "weakening":
+                active_count += 1
+                weakening_count += 1
+            elif item.holding.status == "exited":
+                exited_count += 1
+                if item.realized_pnl > 0:
+                    exited_win_count += 1
+            elif item.holding.status == "invalidated":
+                invalidated_count += 1
+
+        total_pnl = total_market_value - total_cost
+        total_pnl_pct = (total_pnl / total_cost * 100) if total_cost else 0
+        win_rate_pct = (exited_win_count / exited_count * 100) if exited_count else 0
+        average_score = (total_score / len(holdings)) if holdings else 0
+        todo_items = self._build_todo_items(analyses)
+        review_items = self._build_review_items(analyses)
+        return StrategyHoldingAnalysisResponse(
+            total_cost=total_cost,
+            total_market_value=total_market_value,
+            total_pnl=total_pnl,
+            total_pnl_pct=total_pnl_pct,
+            total_realized_pnl=total_realized_pnl,
+            holding_count=len(holdings),
+            active_count=active_count,
+            watching_count=watching_count,
+            planned_count=planned_count,
+            weakening_count=weakening_count,
+            exited_count=exited_count,
+            invalidated_count=invalidated_count,
+            win_rate_pct=round(win_rate_pct, 2),
+            average_score=round(average_score, 2),
+            todo_items=todo_items,
+            review_items=review_items,
+            holdings=analyses,
+        )
+
+    def refresh_holdings(self) -> StrategyHoldingAnalysisResponse:
+        return self.analyze_holdings()
+
+    def _analyze_single_holding(
+        self,
+        holding: StrategyHolding,
+        market_regime: MarketRegimeResponse,
+    ) -> StrategyHoldingAnalysis:
+        candidate = self._score_candidate(
+            {"code": holding.stock_code, "name": holding.stock_name},
+            "market",
+            None,
+        )
+        exit_price = holding.exit_price if holding.status == "exited" else None
+        current_price = float(candidate.metadata.get("current_price") or 0.0)
+        if exit_price is not None:
+            current_price = exit_price
+
+        is_pre_position = holding.status in {"watching", "planned"}
+        market_value = 0.0 if is_pre_position else current_price * holding.quantity
+        cost = holding.entry_price * holding.quantity
+        pnl = 0.0 if is_pre_position else (market_value - cost)
+        pnl_pct = 0.0 if is_pre_position else ((pnl / cost * 100) if cost else 0)
+        realized_pnl = (
+            ((holding.exit_price or 0) - holding.entry_price) * holding.quantity
+            if holding.status == "exited" and holding.exit_price is not None
+            else 0.0
+        )
+        realized_pnl_pct = (realized_pnl / cost * 100) if cost and realized_pnl else 0.0
+        thesis_status, invalidation_reason = self._evaluate_thesis_status(candidate, pnl_pct, holding)
+        alerts = candidate.risks[:]
+        trigger_hits = self._detect_trade_plan_hits(holding, current_price, market_regime)
+        if pnl_pct <= -8:
+            alerts.append("浮亏超过 8%，需要复核是否触发止损。")
+        if invalidation_reason:
+            alerts.insert(0, invalidation_reason)
+        if holding.status == "exited":
+            alerts.insert(0, "该策略持股已退出，收益按卖出价固定。")
+        action_label, action_reason = self._build_holding_action(
+            holding=holding,
+            thesis_status=thesis_status,
+            current_price=current_price,
+            pnl_pct=pnl_pct,
+            market_regime=market_regime,
+        )
+
+        return StrategyHoldingAnalysis(
+            holding=holding,
+            current_price=current_price,
+            market_value=market_value,
+            pnl=pnl,
+            pnl_pct=pnl_pct,
+            realized_pnl=realized_pnl,
+            realized_pnl_pct=realized_pnl_pct,
+            strategy_score=candidate.score,
+            thesis_status=thesis_status,
+            factor_notes=candidate.factor_notes,
+            invalidation_reason=invalidation_reason,
+            action_label=action_label,
+            action_reason=action_reason,
+            trigger_hits=trigger_hits,
+            alerts=alerts[:3],
+        )
+
+    def _build_unavailable_holding_analysis(
+        self,
+        holding: StrategyHolding,
+        market_regime: MarketRegimeResponse,
+        error: Exception,
+    ) -> StrategyHoldingAnalysis:
+        fallback_price = float(holding.exit_price or holding.entry_price or 0.0)
+        is_pre_position = holding.status in {"watching", "planned"}
+        cost = holding.entry_price * holding.quantity
+        market_value = 0.0 if is_pre_position else fallback_price * holding.quantity
+        pnl = 0.0 if is_pre_position else (market_value - cost)
+        pnl_pct = 0.0 if is_pre_position else ((pnl / cost * 100) if cost else 0.0)
+        realized_pnl = (
+            ((holding.exit_price or 0) - holding.entry_price) * holding.quantity
+            if holding.status == "exited" and holding.exit_price is not None
+            else 0.0
+        )
+        realized_pnl_pct = (realized_pnl / cost * 100) if cost and realized_pnl else 0.0
+        alerts = ["行情暂不可用，已保留持仓记录。"]
+        error_message = str(error).strip()
+        if error_message:
+            alerts.append(f"分析降级原因: {error_message}")
+        if holding.status == "exited":
+            alerts.insert(0, "该策略持股已退出，收益按卖出价固定。")
+        trigger_hits = self._detect_trade_plan_hits(holding, fallback_price, market_regime)
+        thesis_status = "broken" if holding.status == "invalidated" else "weakening" if holding.status == "weakening" else "active"
+        action_label, action_reason = self._build_unavailable_holding_action(holding)
+
+        return StrategyHoldingAnalysis(
+            holding=holding,
+            current_price=fallback_price,
+            market_value=market_value,
+            pnl=pnl,
+            pnl_pct=pnl_pct,
+            realized_pnl=realized_pnl,
+            realized_pnl_pct=realized_pnl_pct,
+            strategy_score=StrategyScoreBreakdown(c=0, a=0, n=0, s=0, l=0, i=0, m=0, total=0),
+            thesis_status=thesis_status,
+            factor_notes={
+                "data": "实时行情或评分服务暂时不可用，当前先展示已保存的持仓记录。",
+                "plan": "交易计划字段和持仓状态已保留，可在数据恢复后继续刷新。",
+            },
+            invalidation_reason="行情数据暂不可用，当前无法完整验证交易假设。" if holding.status == "invalidated" else None,
+            action_label=action_label,
+            action_reason=action_reason,
+            trigger_hits=trigger_hits,
+            alerts=alerts[:3],
+        )
+
+    @staticmethod
+    def _build_unavailable_holding_action(holding: StrategyHolding) -> Tuple[str, str]:
+        if holding.status == "exited":
+            return "已退出", "该笔交易已完成退出，当前仅保留记录等待数据恢复。"
+        if holding.status == "invalidated":
+            return "触发卖出", "原持仓已标记失效，当前先保留记录并等待行情恢复后复核。"
+        if holding.status == "watching":
+            return "继续观察", "记录已保存，但实时行情暂不可用，先观察等待刷新。"
+        if holding.status == "planned":
+            return "等待触发", "计划单已保存，但暂时无法校验买点是否命中。"
+        if holding.status == "weakening":
+            return "减仓观察", "持仓已进入走弱状态，但当前无法获取最新行情确认强弱。"
+        return "继续持有", "持仓记录已保存，待行情恢复后再更新最新策略分析。"
+
+    def _build_holding_action(
+        self,
+        *,
+        holding: StrategyHolding,
+        thesis_status: str,
+        current_price: float,
+        pnl_pct: float,
+        market_regime: MarketRegimeResponse,
+    ) -> Tuple[str, str]:
+        entry_zone_hit = self._is_entry_zone_hit(holding, current_price)
+        if holding.status == "exited":
+            return "已退出", "该笔交易已完成退出，不再参与新的加减仓决策。"
+        if holding.status == "invalidated":
+            return "触发卖出", "持仓已被标记为失效，应以退出和复盘为主。"
+        if holding.status == "watching":
+            if entry_zone_hit and market_regime.regime != "risk_off":
+                return "升级计划", "价格进入观察区间，可升级为待执行计划。"
+            return "继续观察", "先跟踪主题和价格是否进入计划区间。"
+        if holding.status == "planned":
+            if market_regime.regime == "risk_off":
+                return "暂停执行", "市场转弱，计划单暂不执行。"
+            if entry_zone_hit:
+                return "可执行买入", "价格进入计划买点区间，可按计划试仓。"
+            return "等待触发", "计划已建立，等待价格进入买点区间。"
+        if holding.plan_stop_loss is not None and current_price <= holding.plan_stop_loss:
+            return "触发卖出", f"当前价已跌破计划止损位 {holding.plan_stop_loss:.2f}。"
+        if holding.plan_take_profit is not None and current_price >= holding.plan_take_profit:
+            return "减仓观察", f"当前价已触及第一目标位 {holding.plan_take_profit:.2f}，可考虑分批兑现。"
+        if thesis_status == "broken":
+            return "触发卖出", "当前策略假设已经破坏，应优先执行退出纪律。"
+        if market_regime.regime == "risk_off":
+            if pnl_pct > 0:
+                return "减仓观察", "大盘转入防守环境，已有利润的持仓应优先保护。"
+            return "禁止加仓", "大盘防守为主，弱势持仓不宜继续加仓。"
+        if holding.status == "weakening":
+            return "减仓观察", "该持仓已进入走弱状态，应限制加仓并准备处理。"
+        if thesis_status == "weakening":
+            return "禁止加仓", "个股逻辑开始走弱，先观察是否重新转强。"
+        if market_regime.regime == "neutral":
+            return "继续持有", "市场仍在震荡，只保留原计划内的强势持仓。"
+        return "继续持有", "市场和个股仍与原交易计划大体一致。"
+
+    def _detect_trade_plan_hits(
+        self,
+        holding: StrategyHolding,
+        current_price: float,
+        market_regime: MarketRegimeResponse,
+    ) -> List[str]:
+        hits: List[str] = []
+        if self._is_entry_zone_hit(holding, current_price):
+            hits.append("进入计划买点区间")
+        if holding.plan_stop_loss is not None and current_price <= holding.plan_stop_loss:
+            hits.append("跌破计划止损位")
+        if holding.plan_take_profit is not None and current_price >= holding.plan_take_profit:
+            hits.append("触及第一目标位")
+        if market_regime.regime == "risk_off":
+            hits.append("市场进入防守状态")
+        return hits
+
+    @staticmethod
+    def _is_entry_zone_hit(holding: StrategyHolding, current_price: float) -> bool:
+        zone = (holding.plan_entry_zone or "").strip()
+        if not zone:
+            return False
+        parts = [part.strip() for part in zone.split("-") if part.strip()]
+        if len(parts) != 2:
+            return False
+        try:
+            low = float(parts[0])
+            high = float(parts[1])
+        except ValueError:
+            return False
+        if low > high:
+            low, high = high, low
+        return low <= current_price <= high
+
+    def _build_todo_items(self, analyses: List[StrategyHoldingAnalysis]) -> List[StrategyTodoItem]:
+        items: List[StrategyTodoItem] = []
+        for item in analyses:
+            priority = self._todo_priority(item)
+            if priority <= 0:
+                continue
+            items.append(
+                StrategyTodoItem(
+                    holding_id=item.holding.id,
+                    stock_code=item.holding.stock_code,
+                    stock_name=item.holding.stock_name,
+                    status=item.holding.status,
+                    action_label=item.action_label,
+                    action_reason=item.action_reason,
+                    priority=priority,
+                )
+            )
+        items.sort(key=lambda entry: (-entry.priority, entry.stock_code))
+        return items[:6]
+
+    def _build_review_items(self, analyses: List[StrategyHoldingAnalysis]) -> List[StrategyReviewItem]:
+        items: List[StrategyReviewItem] = []
+        for item in analyses:
+            if item.holding.status not in {"exited", "invalidated"}:
+                continue
+            items.append(
+                StrategyReviewItem(
+                    holding_id=item.holding.id,
+                    stock_code=item.holding.stock_code,
+                    stock_name=item.holding.stock_name,
+                    status=item.holding.status,
+                    summary=self._review_summary(item),
+                    outcome_label=self._review_outcome(item),
+                )
+            )
+        return items[:6]
+
+    @staticmethod
+    def _todo_priority(item: StrategyHoldingAnalysis) -> int:
+        status = item.holding.status
+        label = item.action_label
+        if label == "触发卖出":
+            return 100
+        if label == "可执行买入":
+            return 90
+        if label == "暂停执行":
+            return 85
+        if label == "减仓观察":
+            return 80
+        if status == "planned" and "进入计划买点区间" in item.trigger_hits:
+            return 88
+        if status == "watching" and label == "升级计划":
+            return 70
+        if status == "holding" and label == "禁止加仓":
+            return 60
+        return 0
+
+    @staticmethod
+    def _review_outcome(item: StrategyHoldingAnalysis) -> str:
+        if item.holding.status == "invalidated":
+            return "假设失效"
+        if item.realized_pnl > 0:
+            return "正收益退出"
+        if item.realized_pnl < 0:
+            return "亏损退出"
+        return "平推退出"
+
+    @staticmethod
+    def _review_summary(item: StrategyHoldingAnalysis) -> str:
+        if item.holding.status == "invalidated":
+            return "原交易假设已失效，后续应复盘是市场、主题还是执行出了问题。"
+        if item.realized_pnl > 0:
+            return f"该笔交易已兑现 {item.realized_pnl:.2f} 收益，可复盘盈利来自主题延续还是执行纪律。"
+        if item.realized_pnl < 0:
+            return f"该笔交易以 {item.realized_pnl:.2f} 收尾，建议复盘止损是否及时、买点是否过激。"
+        return "该笔交易已结束，适合复盘计划执行是否严格。"
+
+    def _sync_portfolio_position_for_code(self, stock_code: str) -> None:
+        normalized_code = normalize_stock_code(stock_code)
+        active_holdings = [
+            item
+            for item in self.store.list_holdings()
+            if normalize_stock_code(item.stock_code) == normalized_code and item.status in {"holding", "weakening"}
+        ]
+        existing = next(
+            (item for item in self.portfolio_store.list_positions() if normalize_stock_code(item.stock_code) == normalized_code),
+            None,
+        )
+
+        if not active_holdings:
+            if existing and existing.id is not None:
+                self.portfolio_store.delete_position(existing.id)
+            return
+
+        total_quantity = sum(item.quantity for item in active_holdings)
+        total_cost = sum(item.entry_price * item.quantity for item in active_holdings)
+        representative = max(active_holdings, key=lambda item: item.updated_at or item.created_at or "")
+        position = PortfolioPosition(
+            stock_code=normalized_code,
+            stock_name=representative.stock_name,
+            cost_price=(total_cost / total_quantity) if total_quantity else representative.entry_price,
+            quantity=total_quantity,
+            weight_pct=existing.weight_pct if existing else None,
+        )
+        if existing and existing.id is not None:
+            self.portfolio_store.update_position(existing.id, position)
+        else:
+            self.portfolio_store.create_position(position)
+
+    def _build_candidates(self, scope: str, topic: Optional[str]) -> List[Dict[str, str]]:
+        if scope == "hotspot":
+            resolved_topic = topic
+            if not resolved_topic:
+                hotspots = self.hotspot_service.list_hotspots(limit=1)
+                resolved_topic = hotspots[0].topic_name if hotspots else None
+            if not resolved_topic:
+                return []
+            detail = self.hotspot_service.get_hotspot_detail(resolved_topic)
+            return [
+                {"code": item.stock_code, "name": item.stock_name}
+                for item in detail.topic.related_stocks
+            ]
+
+        seen_codes: set[str] = set()
+        candidates: List[Dict[str, str]] = []
+        for name, info in stock_searcher.base_stock_db.items():
+            code = normalize_stock_code(str(info.get("code") or ""))
+            if not code or code in seen_codes or not is_a_share_individual_stock(code):
+                continue
+            seen_codes.add(code)
+            candidates.append({"code": code, "name": name})
+
+        if candidates:
+            return candidates
+
+        catalog = get_base_stock_catalog()
+        return [
+            {"code": info["code"], "name": name}
+            for name, info in catalog.items()
+            if is_a_share_individual_stock(info["code"])
+        ]
+
+    def _score_candidate(self, candidate: Dict[str, str], scope: str, topic: Optional[str]) -> StrategyCandidate:
+        analysis = self.stock_service.get_stock_analysis(candidate["code"], include_ai=False)
+        news_items = self.news_service.get_stock_news(candidate["code"], candidate["name"], limit=5)
+        chart_series = analysis.chart_series[-120:] if analysis.chart_series else []
+        closes = [float(item["close"]) for item in chart_series if item.get("close") is not None]
+        volumes = [float(item["volume"]) for item in chart_series if item.get("volume") is not None]
+        news_text = " ".join([f"{item.title} {item.summary}" for item in news_items]).lower()
+
+        current_price = analysis.quote.current_price
+        ma20 = analysis.technical_indicators.get("MA20") or current_price
+        ma60 = analysis.technical_indicators.get("MA60") or current_price
+        rsi = analysis.technical_indicators.get("RSI") or 50
+        recent_high = max(closes) if closes else current_price
+        recent_low = min(closes) if closes else current_price
+        average_volume = sum(volumes[:-5]) / max(len(volumes[:-5]), 1) if len(volumes) > 5 else (sum(volumes) / max(len(volumes), 1) if volumes else 0)
+        latest_volume = volumes[-1] if volumes else 0
+        impact_score = sum(int(item.impact_level) for item in news_items[:3])
+        earnings_mentions = sum(token in news_text for token in ["业绩", "净利润", "营收", "预增", "增长", "订单", "中标"])
+        institutional_mentions = sum(token in news_text for token in ["机构", "增持", "回购", "基金", "北向", "社保", "券商"])
+        price_vs_ma20_pct = ((current_price - ma20) / ma20 * 100) if ma20 else 0
+        price_vs_ma60_pct = ((current_price - ma60) / ma60 * 100) if ma60 else 0
+        drawdown_from_high_pct = ((recent_high - current_price) / recent_high * 100) if recent_high else 0
+
+        c_score = 88 if analysis.quote.change_pct > 4 else 80 if analysis.quote.change_pct > 2 else 68 if analysis.quote.change_pct > 0 else 42
+        c_score = min(95, c_score + earnings_mentions * 4)
+        a_score = 86 if current_price >= ma20 >= ma60 and price_vs_ma60_pct >= 5 else 74 if current_price >= ma20 >= ma60 else 60 if current_price >= ma20 else 42
+        a_score = min(95, a_score + max(earnings_mentions - 1, 0) * 3)
+        near_breakout = recent_high > 0 and current_price >= recent_high * 0.95
+        breakout_today = recent_high > 0 and current_price >= recent_high * 0.995
+        n_score = 92 if breakout_today else 84 if near_breakout else 72 if scope == "hotspot" else 58
+        if topic:
+            n_score = min(95, n_score + 5)
+        volume_ratio = (latest_volume / average_volume) if average_volume else 1
+        s_score = 86 if volume_ratio >= 1.8 else 78 if volume_ratio >= 1.3 else 68 if volume_ratio >= 1.0 else 48
+        l_score = min(95, max(40, analysis.signal_summary.overall_score * 18 + (8 if rsi >= 55 else 0)))
+        i_score = 80 if impact_score >= 9 else 66 if impact_score >= 5 else 50
+        i_score = min(95, i_score + institutional_mentions * 4)
+        market_proxy = "偏强" if scope == "hotspot" else "中性"
+        if current_price < ma60 and analysis.signal_summary.overall_score <= 2:
+            market_proxy = "偏弱"
+        m_score = 78 if scope == "hotspot" and current_price >= ma20 else 68 if current_price >= ma60 else 52
+
+        total = round(
+            c_score * 0.12
+            + a_score * 0.14
+            + n_score * 0.2
+            + s_score * 0.12
+            + l_score * 0.18
+            + i_score * 0.1
+            + m_score * 0.14,
+            1,
+        )
+        score = StrategyScoreBreakdown(
+            c=round(c_score, 1),
+            a=round(a_score, 1),
+            n=round(n_score, 1),
+            s=round(s_score, 1),
+            l=round(l_score, 1),
+            i=round(i_score, 1),
+            m=round(m_score, 1),
+            total=total,
+        )
+        factor_notes = {
+            "c": f"近一日涨幅 {analysis.quote.change_pct:.2f}%，业绩/订单类信号 {earnings_mentions} 个，动量{'偏强' if c_score >= 75 else '一般' if c_score >= 60 else '偏弱'}。",
+            "a": f"相对均线结构: MA20 距离 {price_vs_ma20_pct:.1f}%，MA60 距离 {price_vs_ma60_pct:.1f}%，成长性代理信号 {earnings_mentions} 个。",
+            "n": f"距阶段高点回撤 {drawdown_from_high_pct:.1f}%，{'已接近突破位' if near_breakout else '尚未接近突破位'}。",
+            "s": f"量比近似 {volume_ratio:.2f}，最新成交量{'放大' if volume_ratio >= 1.2 else '未明显放大'}。",
+            "l": f"技术总信号 {analysis.signal_summary.overall_signal} / {analysis.signal_summary.overall_score}，RSI {rsi:.1f}。",
+            "i": f"近 5 条消息累计影响分 {impact_score}，机构/资金类信号 {institutional_mentions} 个，市场关注度{'较高' if i_score >= 70 else '一般'}。",
+            "m": f"市场环境代理为 {market_proxy}，{'热点主题加分' if scope == 'hotspot' else '按全市场中性口径处理'}。",
+        }
+
+        reasons: List[str] = []
+        if current_price >= ma20:
+            reasons.append("股价站上 MA20，短中期趋势维持强势。")
+        if current_price >= ma60:
+            reasons.append("股价位于 MA60 上方，中期结构没有破坏。")
+        if near_breakout:
+            reasons.append("价格接近阶段新高，符合 CAN SLIM 对新高突破的偏好。")
+        if volume_ratio >= 1.2:
+            reasons.append(f"近期量能放大至均量的 {volume_ratio:.1f} 倍，资金参与度提升。")
+        if scope == "hotspot" and topic:
+            reasons.append(f"该股来自“{topic}”热点主题，具备题材催化。")
+        if impact_score >= 5:
+            reasons.append("近期消息催化较多，机构和市场关注度较高。")
+        if earnings_mentions >= 2:
+            reasons.append("近期消息中出现较多业绩/订单类积极信号。")
+        if institutional_mentions >= 1:
+            reasons.append("近期有机构、增持或回购类关注信号。")
+
+        risks: List[str] = []
+        if current_price < ma20:
+            risks.append("股价跌破 MA20，短线强势结构偏弱。")
+        if current_price < ma60:
+            risks.append("股价跌破 MA60，中期趋势有破坏迹象。")
+        if rsi >= 75:
+            risks.append("RSI 偏高，短期可能面临震荡或回撤。")
+        if volume_ratio < 1:
+            risks.append("量能没有明显放大，突破持续性需要确认。")
+        if drawdown_from_high_pct >= 12:
+            risks.append("距离阶段高点回撤较深，离强势突破形态较远。")
+        if analysis.signal_summary.overall_score <= 2:
+            risks.append("现有技术信号偏弱，仍需等待更清晰确认。")
+
+        return StrategyCandidate(
+            strategy_key="can_slim",
+            stock_code=analysis.stock_code,
+            stock_name=analysis.stock_name,
+            market=analysis.market,
+            score=score,
+            factor_notes=factor_notes,
+            reasons=reasons[:4],
+            risks=risks[:3],
+            source_scope=scope,
+            source_topic=topic,
+            metadata={
+                "current_price": current_price,
+                "change_pct": analysis.quote.change_pct,
+                "volume_ratio": round(volume_ratio, 2),
+                "news_count": len(news_items),
+                "signal": analysis.signal_summary.overall_signal,
+                "drawdown_from_high_pct": round(drawdown_from_high_pct, 2),
+                "recent_low": recent_low,
+                "symbol": extract_symbol(analysis.stock_code),
+            },
+        )
+
+    def _evaluate_thesis_status(
+        self,
+        candidate: StrategyCandidate,
+        pnl_pct: float,
+        holding: Optional[StrategyHolding] = None,
+    ) -> Tuple[str, Optional[str]]:
+        if holding and holding.status == "exited":
+            reason = "已按策略退出。"
+            if holding.exit_price is not None and holding.exit_date:
+                reason = f"已于 {holding.exit_date} 按 {holding.exit_price:.2f} 退出。"
+            return "active", reason
+        if holding and holding.status == "invalidated":
+            return "broken", "该策略持股已被手动标记为失效。"
+        score = candidate.score.total
+        current_price = float(candidate.metadata.get("current_price") or 0)
+        ma60_distance = candidate.factor_notes.get("a", "")
+        if pnl_pct <= -8:
+            return "broken", "浮亏达到 8% 止损阈值，策略假设需要重新确认。"
+        if score < 50:
+            return "broken", "当前 CAN SLIM 总分跌破 50，已偏离强势股标准。"
+        if any("MA60" in risk for risk in candidate.risks) and score < 60:
+            return "broken", "股价跌破 MA60 且总分偏弱，中期趋势假设失效。"
+        if score < 68 or current_price <= 0 or "MA60 距离 -" in ma60_distance:
+            return "weakening", "策略评分下滑，需重点观察是否继续失真。"
+        return "active", None
+
+
 class AgentService:
     def __init__(
         self,
@@ -1481,6 +2711,27 @@ class AgentService:
         rewrite = self._rewrite_query(query, history, memory_profile, target or context_target)
         slots = self._build_context_slots(query, rewrite, history, memory_profile)
         report("select_engine", 25, "已完成意图路由，准备执行对应分析")
+
+        if rewrite.intent == "model_info":
+            runtime_config = self.stock_service._runtime_config()
+            model_name = runtime_config.llm_model
+            base_url = runtime_config.llm_base_url
+            return AgentResponse(
+                intent="model_info",
+                summary=(
+                    "## 当前模型配置\n"
+                    f"- 模型: `{model_name}`\n"
+                    f"- Base URL: `{base_url}`\n"
+                    "- 如需切换，可在设置页或环境变量中修改后重启后端。"
+                ),
+                actions=["打开设置页查看模型配置", "如需切换模型，告诉我目标模型名即可"],
+                citations=["/api/settings"],
+                payload={
+                    "model": model_name,
+                    "provider": base_url,
+                    "_meta": self._meta_payload(tools_used, cache_hits, rewrite, slots),
+                },
+            )
 
         if rewrite.intent == "help":
             return AgentResponse(
@@ -1956,6 +3207,17 @@ class AgentService:
             token in lower_query for token in ["latest", "breaking", "search", "实时", "最新", "刚刚", "突发", "联网"]
         )
         include_context = any(token in query for token in ["世界", "全球", "宏观", "局势", "国际", "科技大事", "伊朗", "油价"])
+        if any(token in lower_query for token in ["model", "llm"]) or any(
+            token in query for token in ["什么模型", "哪个模型", "模型名称", "当前模型", "你现在用的模型", "你现在用什么模型"]
+        ):
+            return IntentRewriteResult(
+                intent="model_info",
+                rewritten_query="查看当前模型配置",
+                target_stock=None,
+                wants_live_web=False,
+                include_context=False,
+                follow_up=False,
+            )
         if any(token in lower_query for token in ["help", "what can you do"]) or any(
             token in query for token in ["你能做什么", "你会什么", "怎么用", "如何用", "支持什么", "支持哪些功能", "能做什么", "帮助"]
         ):
