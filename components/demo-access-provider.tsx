@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { DEMO_ACCESS_STATUS_PATH, type DemoAccessStatus } from "@/lib/demo-access";
 
@@ -80,10 +80,6 @@ export function DemoAccessProvider({
 
   const openDialog = useCallback(() => setDialogOpen(true), []);
   const closeDialog = useCallback(() => setDialogOpen(false), []);
-
-  useEffect(() => {
-    void refresh().catch(() => setLoaded(true));
-  }, [refresh]);
 
   const value = useMemo<DemoAccessContextValue>(
     () => ({

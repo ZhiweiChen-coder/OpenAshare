@@ -9,9 +9,10 @@ type StockPanelLinkProps = {
   panel: "overview" | "ai" | "news";
   className?: string;
   children: ReactNode;
+  compactLoading?: boolean;
 };
 
-export function StockPanelLink({ stockCode, panel, className, children }: StockPanelLinkProps) {
+export function StockPanelLink({ stockCode, panel, className, children, compactLoading = false }: StockPanelLinkProps) {
   const router = useRouter();
   const fallbackHref = `/stocks?query=${encodeURIComponent(stockCode)}&panel=${panel}#${panel}`;
   const [isNavigating, setIsNavigating] = useState(false);
@@ -46,11 +47,13 @@ export function StockPanelLink({ stockCode, panel, className, children }: StockP
     <Link
       href={fallbackHref}
       prefetch={false}
-      className={`${className ?? ""}${isNavigating ? " is-loading is-loading-steps" : ""}`}
+      className={`${className ?? ""}${isNavigating ? (compactLoading ? " is-loading" : " is-loading is-loading-steps") : ""}`}
       onClick={handleClick}
       aria-busy={isNavigating}
     >
-      {isNavigating && (panel === "ai" || panel === "news") ? (
+      {isNavigating && compactLoading ? (
+        "打开中..."
+      ) : isNavigating && (panel === "ai" || panel === "news") ? (
         <span className="button-loading-copy button-loading-copy--panel">
           <span className="button-loading-kicker">{panel === "ai" ? "AI 分析" : "相关新闻"}</span>
           <strong>{openingSteps[stepIndex]}</strong>

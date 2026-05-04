@@ -1,11 +1,24 @@
 from types import SimpleNamespace
 from datetime import datetime, timezone
+import asyncio
+import json
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 import pandas as pd
+import pytest
 
 import api.services as services_module
-from api.main import AgentMemoryStore, _attach_memory_profile, _get_pydantic_agent, _warm_read_caches, agent_service, app, news_service
+from api.main import (
+    AgentMemoryStore,
+    _attach_memory_profile,
+    _get_pydantic_agent,
+    _warm_read_caches,
+    agent_service,
+    app,
+    global_exception_handler,
+    news_service,
+)
 from api.schemas import (
     AIInsight,
     AgentResponse,
@@ -17,6 +30,7 @@ from api.schemas import (
     ModelOption,
     MarketRegimeResponse,
     NewsItem,
+    PortfolioPosition,
     QuoteSnapshot,
     SignalSummary,
     StrategyCandidate,
@@ -117,6 +131,102 @@ def test_analysis_endpoint(monkeypatch):
     payload = response.json()
     assert payload["stock_name"] == "招商银行"
     assert payload["signal_summary"]["overall_score"] == 4
+
+
+def test_ai_analysis_response_is_private_no_store(monkeypatch):
+    monkeypatch.setattr(
+        "api.main.stock_service.get_stock_analysis",
+        lambda code, include_ai=True: _make_stock_analysis(code, "招商银行", 4, "看涨", 42.5, 2.9),
+    )
+    response = client.get("/api/stocks/sh600036/analysis", params={"include_ai": "true"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["vary"] == "Cookie"
+
+
+def test_public_analysis_response_keeps_public_cache(monkeypatch):
+    monkeypatch.setattr(
+        "api.main.stock_service.get_stock_analysis",
+        lambda code, include_ai=True: _make_stock_analysis(code, "招商银行", 4, "看涨", 42.5, 2.9),
+    )
+    response = client.get("/api/stocks/sh600036/analysis", params={"include_ai": "false"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"].startswith("public, max-age=120")
+    assert "vary" not in response.headers
+
+
+def test_stock_analysis_preserves_streamed_ai_insight_metadata(monkeypatch):
+    service = services_module.StockAnalysisService(config=services_module.Config())
+    dataframe = pd.DataFrame(
+        [
+            {
+                "date": "2026-03-08",
+                "open": 41.1,
+                "high": 42.8,
+                "low": 40.9,
+                "close": 42.5,
+                "volume": 123456,
+                "RSI": 58,
+                "MACD": 0.42,
+            }
+        ]
+    )
+    bundle = services_module.AnalyzerBundle(
+        analyzer=SimpleNamespace(llm=None, llm_base_url=None, llm_model=None),
+        analysis={
+            "股票名称": "招商银行",
+            "股票代码": "sh600036",
+            "基础数据": {
+                "最新价格": 42.5,
+                "涨跌": 1.2,
+                "涨跌幅": 2.9,
+                "开盘价": 41.1,
+                "最高价": 42.8,
+                "最低价": 40.9,
+                "成交量": 123456,
+                "振幅": 4.6,
+            },
+            "技术分析建议": ["均线多头排列"],
+        },
+        signals={"overall_score": 4, "overall_signal": "看涨"},
+        dataframe=dataframe,
+        ai_text="AI 分析已生成",
+        ai_requested=True,
+        ai_provider="https://api.deepseek.com",
+        ai_model="deepseek-chat",
+    )
+    monkeypatch.setattr(service, "build_analysis_bundle", lambda *args, **kwargs: bundle)
+
+    response = service.get_stock_analysis(
+        "sh600036",
+        include_ai=True,
+        progress_callback=lambda *args, **kwargs: None,
+        request_id="stream-test",
+    )
+
+    assert response.ai_insight.enabled is True
+    assert response.ai_insight.content == "AI 分析已生成"
+    assert response.ai_insight.provider == "https://api.deepseek.com"
+    assert response.ai_insight.model == "deepseek-chat"
+
+
+def test_global_exception_handler_hides_internal_details():
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/boom",
+            "headers": [(b"x-request-id", b"test-request-id")],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "client": ("testclient", 50000),
+        }
+    )
+    response = asyncio.run(global_exception_handler(request, RuntimeError("secret database path")))
+    payload = json.loads(response.body)
+    assert response.status_code == 500
+    assert payload == {"detail": "Internal server error", "request_id": "test-request-id"}
 
 
 def test_get_settings_endpoint(monkeypatch):
@@ -403,6 +513,57 @@ def test_strategy_holdings_endpoints(monkeypatch):
     assert refresh_response.json()["total_pnl"] == 750
 
 
+def test_portfolio_missing_mutations_return_404(monkeypatch):
+    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
+
+    def raise_missing(*args, **kwargs):
+        raise services_module.NotFoundError("Portfolio position 999 not found")
+
+    monkeypatch.setattr("api.main.portfolio_service.update_position", raise_missing)
+    monkeypatch.setattr("api.main.portfolio_service.delete_position", raise_missing)
+
+    update_response = client.put(
+        "/api/portfolio/positions/999",
+        json={
+            "stock_code": "sh600036",
+            "stock_name": "招商银行",
+            "cost_price": 42.5,
+            "quantity": 100,
+            "weight_pct": 20,
+        },
+    )
+    assert update_response.status_code == 404
+
+    delete_response = client.delete("/api/portfolio/positions/999")
+    assert delete_response.status_code == 404
+
+
+def test_strategy_holding_missing_mutations_return_404(monkeypatch):
+    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
+
+    def raise_missing(*args, **kwargs):
+        raise services_module.NotFoundError("Strategy holding 999 not found")
+
+    monkeypatch.setattr("api.main.strategy_service.update_holding", raise_missing)
+    monkeypatch.setattr("api.main.strategy_service.delete_holding", raise_missing)
+
+    update_response = client.put(
+        "/api/strategy-holdings/999",
+        json={
+            "strategy_key": "can_slim",
+            "stock_code": "sh688041",
+            "stock_name": "海光信息",
+            "entry_price": 120.5,
+            "quantity": 100,
+            "status": "holding",
+        },
+    )
+    assert update_response.status_code == 404
+
+    delete_response = client.delete("/api/strategy-holdings/999")
+    assert delete_response.status_code == 404
+
+
 def test_market_regime_endpoint(monkeypatch):
     monkeypatch.setattr(
         "api.main.market_service.get_market_regime",
@@ -473,6 +634,43 @@ def test_strategy_holding_store_persists_trade_plan_fields(tmp_path):
     loaded = store.list_holdings()[0]
     assert loaded.plan_reason == "主线热度高，趋势结构完整。"
     assert loaded.status == "planned"
+
+
+def test_portfolio_store_raises_not_found_for_missing_update_and_delete(tmp_path):
+    from api.services import NotFoundError, PortfolioStore
+
+    store = PortfolioStore(db_path=str(tmp_path / "portfolio.db"))
+    position = PortfolioPosition(
+        stock_code="sh600036",
+        stock_name="招商银行",
+        cost_price=42.5,
+        quantity=100,
+        weight_pct=20,
+    )
+
+    with pytest.raises(NotFoundError):
+        store.update_position(999, position)
+    with pytest.raises(NotFoundError):
+        store.delete_position(999)
+
+
+def test_strategy_holding_store_raises_not_found_for_missing_update_and_delete(tmp_path):
+    from api.services import NotFoundError, StrategyHoldingStore
+
+    store = StrategyHoldingStore(db_path=str(tmp_path / "strategy.db"))
+    holding = StrategyHolding(
+        strategy_key="can_slim",
+        stock_code="sh688041",
+        stock_name="海光信息",
+        entry_price=120.5,
+        quantity=100,
+        status="holding",
+    )
+
+    with pytest.raises(NotFoundError):
+        store.update_holding(999, holding)
+    with pytest.raises(NotFoundError):
+        store.delete_holding(999)
 
 
 def test_strategy_holdings_analysis_keeps_saved_records_when_quote_fetch_fails(monkeypatch):
@@ -917,6 +1115,33 @@ def test_get_pydantic_agent_rebuilds_when_model_changes(monkeypatch):
         ("test-key", "https://api.deepseek.com", "deepseek-chat"),
         ("test-key", "https://api.deepseek.com", "deepseek-reasoner"),
     ]
+
+
+def test_get_pydantic_agent_returns_fresh_deps_for_cached_agent(monkeypatch):
+    monkeypatch.setattr(
+        "api.main.settings_store.build_runtime_config",
+        lambda config: SimpleNamespace(
+            llm_api_key="test-key",
+            llm_base_url="https://api.deepseek.com",
+            llm_model="deepseek-chat",
+        ),
+    )
+    monkeypatch.setattr("api.main.create_agent", lambda **kwargs: object())
+    import api.main as main_module
+
+    main_module._pydantic_agent = None
+    main_module._agent_deps = None
+    main_module._pydantic_agent_signature = None
+
+    agent_one, deps_one = _get_pydantic_agent()
+    agent_two, deps_two = _get_pydantic_agent()
+
+    assert agent_one is agent_two
+    assert deps_one is not deps_two
+    deps_one.tool_results.append({"tool": "get_stock_analysis", "data": {"stock_code": "sh600036"}})
+    deps_one.progress_callback = lambda *args, **kwargs: None
+    assert deps_two.tool_results == []
+    assert deps_two.progress_callback is None
 
 
 def test_build_agent_response_includes_full_stock_analysis_payload():

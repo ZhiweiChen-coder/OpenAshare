@@ -139,6 +139,7 @@ export function PortfolioShell({
   const prefillLabel = initialPrefill?.stock_name ?? initialPrefill?.stock_code ?? "";
   const isBusy = pendingAction !== null;
   const safeStrategyAnalysis = normalizeStrategyAnalysis(strategyAnalysis);
+  const strategyRefreshInProgress = pendingAction?.type === "refresh" || isAnalysisRefreshing;
 
   function fillStrategyForm(holding: StrategyHolding) {
     setStrategyForm({
@@ -452,6 +453,7 @@ export function PortfolioShell({
 
   function onRefreshStrategyAnalysis() {
     setPendingAction({ type: "refresh" });
+    setIsAnalysisRefreshing(true);
     setMessage("正在刷新策略持股分析...");
     setMarketRegimeLoading(true);
     setMarketRegimeError(null);
@@ -483,6 +485,7 @@ export function PortfolioShell({
         setMessage(`刷新失败: ${getClientErrorMessage(error)}`);
       } finally {
         setMarketRegimeLoading(false);
+        setIsAnalysisRefreshing(false);
         setPendingAction(null);
       }
     })();
@@ -671,7 +674,7 @@ export function PortfolioShell({
             <span className="tag">持仓中: {safeStrategyAnalysis.active_count}</span>
             <span className="tag">待执行: {safeStrategyAnalysis.planned_count}</span>
             <span className="tag">观察中: {safeStrategyAnalysis.watching_count}</span>
-            {isAnalysisRefreshing ? <span className="tag">分析刷新中...</span> : null}
+            {strategyRefreshInProgress ? <span className="tag portfolio-live-tag">分析刷新中...</span> : null}
           </div>
           <p className="muted" style={{ marginTop: 16 }}>{message}</p>
           {initialPrefill?.return_to || lastSubmitted ? (
@@ -976,13 +979,21 @@ export function PortfolioShell({
             <p className="muted">记录按策略买入的模型组合，并按需手动刷新评分与盈亏。</p>
           </div>
           <div className="inline-actions">
-            <button className="button ghost" type="button" onClick={onRefreshStrategyAnalysis} disabled={isBusy || isAnalysisRefreshing}>
-              {pendingAction?.type === "refresh" || isAnalysisRefreshing ? "刷新中..." : "刷新策略持股"}
+            <button
+              className={`button ghost ${strategyRefreshInProgress ? "is-loading" : ""}`}
+              type="button"
+              onClick={onRefreshStrategyAnalysis}
+              disabled={isBusy || isAnalysisRefreshing}
+            >
+              {strategyRefreshInProgress ? "刷新中..." : "刷新策略持股"}
             </button>
           </div>
         </div>
+        {strategyRefreshInProgress ? (
+          <StrategyHoldingsRefreshSkeleton holdingCount={Math.max(2, Math.min(4, safeStrategyAnalysis.holdings.length || 3))} />
+        ) : null}
         {safeStrategyAnalysis.holdings.length ? (
-          <>
+          <div className={strategyRefreshInProgress ? "portfolio-refreshing-content" : undefined}>
             {safeStrategyAnalysis.todo_items.length ? (
               <section className="strategy-summary-block" style={{ marginTop: 16 }}>
                 <div className="detail-block-head">
@@ -1219,11 +1230,47 @@ export function PortfolioShell({
                 );
               })}
             </div>
-          </>
+          </div>
         ) : (
-          <p className="muted" style={{ marginTop: 16 }}>当前还没有策略持股记录。</p>
+          strategyRefreshInProgress ? null : <p className="muted" style={{ marginTop: 16 }}>当前还没有策略持股记录。</p>
         )}
       </section>
+    </div>
+  );
+}
+
+function StrategyHoldingsRefreshSkeleton({ holdingCount }: { holdingCount: number }) {
+  return (
+    <div className="portfolio-refresh-skeleton" aria-live="polite" aria-label="正在刷新策略持股分析">
+      <div className="portfolio-refresh-skeleton-head">
+        <div>
+          <span className="portfolio-refresh-kicker">Refreshing Strategy Model</span>
+          <strong>正在重算 CANSLIM 评分与持仓盈亏</strong>
+        </div>
+        <span>行情 / 消息 / 市场环境</span>
+      </div>
+      <div className="portfolio-refresh-track" aria-hidden="true">
+        <span />
+      </div>
+      <div className="portfolio-skeleton-grid">
+        {Array.from({ length: holdingCount }).map((_, index) => (
+          <div className="portfolio-skeleton-card" key={index}>
+            <div className="portfolio-skeleton-line wide" />
+            <div className="portfolio-skeleton-line medium" />
+            <div className="portfolio-skeleton-metrics">
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="portfolio-skeleton-canslim">
+              {Array.from({ length: 7 }).map((__, itemIndex) => (
+                <i key={itemIndex} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

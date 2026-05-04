@@ -106,20 +106,25 @@ export function StockAnalysisProgress({
   const currentLabel = progress.message || "正在处理分析请求";
   const targetLabel = query || progress.stock_code || "当前标的";
   const progressPct = clampProgress(progress.progress_pct || 0);
+  const isLive = progress.status === "pending" || progress.status === "unknown";
 
   return (
-    <section className={`analysis-progress-card ${compact ? "compact" : ""}`}>
+    <section className={`analysis-progress-card ${compact ? "compact" : ""} ${isLive ? "is-live" : ""}`}>
       <div className="analysis-progress-backdrop" aria-hidden="true" />
+      <div className="analysis-progress-scan" aria-hidden="true" />
       <div className="analysis-progress-head">
         <div>
           <div className="analysis-progress-kicker">Live Analysis Trace</div>
           <h2>{compact ? "分析处理中" : "分析进度"}</h2>
         </div>
-        <div className={`analysis-progress-badge status-${progress.status}`}>{formatStatus(progress.status)}</div>
+        <div className={`analysis-progress-badge status-${progress.status}`}>
+          <span aria-hidden="true" />
+          {formatStatus(progress.status)}
+        </div>
       </div>
 
       <div className="analysis-progress-meter">
-        <div className="analysis-progress-ring">
+        <div className="analysis-progress-ring" aria-label={`分析进度 ${progressPct}%`}>
           <svg viewBox="0 0 120 120" aria-hidden="true">
             <circle cx="60" cy="60" r="48" className="analysis-progress-ring-track" />
             <circle
@@ -130,6 +135,7 @@ export function StockAnalysisProgress({
               style={{ strokeDashoffset: `${302 - (302 * progressPct) / 100}` }}
             />
           </svg>
+          <span className="analysis-progress-ring-spark" aria-hidden="true" />
           <div className="analysis-progress-ring-copy">
             <strong>{progressPct}%</strong>
             <span>{panel === "ai" ? "AI 深析" : panel === "news" ? "新闻追踪" : "总览分析"}</span>
@@ -138,7 +144,16 @@ export function StockAnalysisProgress({
 
         <div className="analysis-progress-summary">
           <p className="analysis-progress-target">正在处理 {targetLabel}</p>
-          <h3>{currentLabel}</h3>
+          <h3>
+            {currentLabel}
+            {isLive ? (
+              <span className="analysis-progress-thinking" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            ) : null}
+          </h3>
           <div className="analysis-progress-bar" aria-hidden="true">
             <span style={{ width: `${progressPct}%` }} />
           </div>

@@ -6,10 +6,14 @@ export function DemoAccessGate({
   title,
   description,
   compact = false,
+  unlockLabel = "解锁演示",
+  clearLabel = "清除密钥",
 }: {
   title: string;
   description: string;
   compact?: boolean;
+  unlockLabel?: string;
+  clearLabel?: string;
 }) {
   const { unlocked, loaded, openDialog, revoke } = useDemoAccess();
 
@@ -28,13 +32,12 @@ export function DemoAccessGate({
       </div>
       <div className="inline-actions">
         <button className="button" type="button" onClick={openDialog}>
-          解锁演示
+          {unlockLabel}
         </button>
         <button className="button ghost" type="button" onClick={revoke}>
-          清除密钥
+          {clearLabel}
         </button>
       </div>
     </div>
   );
 }
-

@@ -2,6 +2,14 @@
 
 import { useMemo, type ReactNode } from "react";
 
+type AICarouselProps = {
+  content: string;
+  stockName?: string;
+  stockCode?: string;
+  provider?: string | null;
+  model?: string | null;
+};
+
 function normalizeAnalysisMarkdown(markdown: string): string {
   const text = (markdown || "").trim();
   if (!text) return "";
@@ -34,7 +42,7 @@ type ParsedReport = {
 };
 
 const HEADING_PATTERN =
-  /^(?:#+\s*)?(?:[\u{1F300}-\u{1FAFF}]\s*)?(?:\d+[.、]\s*)?(分析摘要|概述|股票概况|技术分析|成交量分析|风险评估|投资建议|风险提示与免责声明|重要提示|请确保|本分析报告)/u;
+  /^(?:#+\s*)?(?:\d+[.、]\s*)?(?:[\u{1F300}-\u{1FAFF}]\s*)?(分析摘要|概述|股票概况|技术分析|成交量分析|风险评估|投资建议|风险提示与免责声明|重要提示|请确保|本分析报告)/u;
 
 function parseAnalysisReport(content: string): ParsedReport {
   const normalized = normalizeReportText(content);
@@ -52,16 +60,16 @@ function parseAnalysisReport(content: string): ParsedReport {
 
   for (const rawLine of lines) {
     const line = cleanMarkdownLine(rawLine);
-    if (!line || /^-{3,}$/.test(line)) continue;
+    if (!line || /^-{3,}$/.test(line) || /^#{1,6}$/.test(line)) continue;
 
     if (isReportTitle(line)) {
-      report.title = line.replace(/^#+\s*/, "");
+      report.title = cleanHeadingText(line);
       continue;
     }
 
     if (isSectionHeading(line)) {
       currentSection = {
-        title: line.replace(/^#+\s*/, ""),
+        title: cleanHeadingText(line),
         items: [],
         paragraphs: [],
       };
@@ -103,6 +111,7 @@ function normalizeReportText(content: string) {
     .replace(/\r\n/g, "\n")
     .replace(/```/g, "")
     .replace(/\s*---+\s*/g, "\n")
+    .replace(/(^|\n)\s*#{1,6}\s*(?=\n|$)/g, "\n")
     .replace(/\s+(#{1,3}\s+)/g, "\n$1")
     .replace(/\s+(\d+[.、]\s*[\u{1F300}-\u{1FAFF}]?\s*[\u4e00-\u9fa5]{2,16})/gu, "\n$1")
     .replace(/\s+((?:#{1,3}\s*)?[\u{1F300}-\u{1FAFF}]?\s*(?:分析摘要|概述|重要提示|请确保))/gu, "\n$1")
@@ -118,6 +127,15 @@ function cleanMarkdownLine(line: string) {
     .replace(/^#+\s*/, (match) => match)
     .replace(/\*\*\s+/g, "**")
     .replace(/\s+\*\*/g, " **")
+    .trim();
+}
+
+function cleanHeadingText(line: string) {
+  return line
+    .replace(/^#+\s*/, "")
+    .replace(/^\d+[.、]\s*/, "")
+    .replace(/^[\u{1F300}-\u{1FAFF}]\s*/u, "")
+    .replace(/\*\*/g, "")
     .trim();
 }
 
@@ -168,12 +186,21 @@ function sectionTone(title: string) {
   return "default";
 }
 
-export function AICarousel({ content }: { content: string }) {
+export function AICarousel({ content, stockName, stockCode, provider, model }: AICarouselProps) {
   const report = useMemo(() => parseAnalysisReport(content), [content]);
 
   if (!content?.trim()) {
     return <p className="muted">AI 暂未返回内容。</p>;
   }
+
+  const handleDownloadPdf = () => {
+    printReportAsPdf(report, {
+      stockName,
+      stockCode,
+      provider,
+      model,
+    });
+  };
 
   return (
     <div className="ai-carousel">
@@ -182,6 +209,11 @@ export function AICarousel({ content }: { content: string }) {
           <div className="ai-carousel-kicker">AI 分析</div>
           <h3 className="ai-carousel-title">分析阅读稿</h3>
           <p className="ai-carousel-subtitle">已按投研报告结构整理为摘要、章节和关键要点。</p>
+        </div>
+        <div className="ai-carousel-actions">
+          <button className="button ghost ai-download-button" type="button" onClick={handleDownloadPdf}>
+            下载 PDF
+          </button>
         </div>
       </div>
 
@@ -232,4 +264,207 @@ export function AICarousel({ content }: { content: string }) {
       </div>
     </div>
   );
+}
+
+function printReportAsPdf(
+  report: ParsedReport,
+  metadata: Pick<AICarouselProps, "stockName" | "stockCode" | "provider" | "model">,
+) {
+  if (typeof window === "undefined") return;
+
+  const printWindow = window.open("", "_blank", "width=980,height=1200");
+  if (!printWindow) {
+    window.alert("浏览器阻止了下载窗口，请允许弹窗后重试。");
+    return;
+  }
+  printWindow.opener = null;
+
+  const stockLabel = [metadata.stockName, metadata.stockCode].filter(Boolean).join(" ");
+  const generatedAt = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+  const subtitle = [
+    stockLabel || "当前股票",
+    `生成时间 ${generatedAt}`,
+    metadata.model ? `模型 ${metadata.model}` : metadata.provider ? `服务 ${metadata.provider}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  printWindow.document.open();
+  printWindow.document.write(buildPrintableReportHtml(report, subtitle));
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => {
+    printWindow.print();
+  }, 250);
+}
+
+function buildPrintableReportHtml(report: ParsedReport, subtitle: string) {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(report.title)}</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #171717;
+      background: #fff;
+      font-family: "Avenir Next", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+      line-height: 1.75;
+    }
+    .report { display: grid; gap: 18px; }
+    .cover {
+      padding: 22px 24px;
+      border: 1px solid #ded8cf;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #f8f5ef, #ffffff);
+    }
+    .eyebrow {
+      color: #0f8a7b;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 8px 0 6px;
+      font-size: 25px;
+      line-height: 1.35;
+    }
+    .subtitle {
+      margin: 0;
+      color: #6b655f;
+      font-size: 12px;
+    }
+    .lead { display: grid; gap: 8px; margin-top: 14px; }
+    .lead p, .section p, .item p { margin: 0; }
+    .section {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      padding: 18px;
+      border: 1px solid #e4dfd7;
+      border-left: 4px solid #0f8a7b;
+      border-radius: 12px;
+    }
+    .section + .section { margin-top: 12px; }
+    .section-head {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      padding: 7px 11px 7px 7px;
+      border-radius: 999px;
+      background: #f4f1eb;
+      border: 1px solid #e4dfd7;
+      white-space: nowrap;
+    }
+    .index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 26px;
+      border-radius: 999px;
+      background: #fff;
+      color: #6b655f;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+    .paragraphs { display: grid; gap: 10px; }
+    .items {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .item {
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: #fbfaf7;
+      border: 1px solid #ebe6de;
+    }
+    .item strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    strong { font-weight: 800; }
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #f0ece5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+  </style>
+</head>
+<body>
+  <main class="report">
+    <header class="cover">
+      <div class="eyebrow">AI Analysis Report</div>
+      <h1>${renderInlineHtml(report.title)}</h1>
+      <p class="subtitle">${escapeHtml(subtitle)}</p>
+      ${renderParagraphGroupHtml(report.lead, "lead")}
+    </header>
+    ${report.sections.map(renderSectionHtml).join("")}
+  </main>
+  <script>
+    document.title = ${JSON.stringify(sanitizeFileName(report.title))};
+  </script>
+</body>
+</html>`;
+}
+
+function renderSectionHtml(section: ReportSection, index: number) {
+  return `<section class="section">
+    <div class="section-head">
+      <span class="index">${String(index + 1).padStart(2, "0")}</span>
+      <h2>${renderInlineHtml(section.title)}</h2>
+    </div>
+    ${renderParagraphGroupHtml(section.paragraphs, "paragraphs")}
+    ${
+      section.items.length
+        ? `<div class="items">${section.items
+            .map(
+              (item) => `<div class="item">${item.label ? `<strong>${renderInlineHtml(item.label)}</strong>` : ""}<p>${renderInlineHtml(item.text)}</p></div>`,
+            )
+            .join("")}</div>`
+        : ""
+    }
+  </section>`;
+}
+
+function renderParagraphGroupHtml(paragraphs: string[], className: string) {
+  if (!paragraphs.length) return "";
+  return `<div class="${className}">${paragraphs.map((paragraph) => `<p>${renderInlineHtml(paragraph)}</p>`).join("")}</div>`;
+}
+
+function renderInlineHtml(text: string) {
+  return escapeHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeFileName(text: string) {
+  return `${text.replace(/[\\/:*?"<>|]/g, "_").slice(0, 48) || "AI分析报告"}.pdf`;
 }

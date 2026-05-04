@@ -67,6 +67,10 @@ from ashare.stock_pool import (
 ProgressCallback = Callable[[str, int, str, Optional[Dict[str, Any]]], None]
 
 
+class NotFoundError(ValueError):
+    """Raised when a requested persisted resource does not exist."""
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -245,6 +249,9 @@ class AnalyzerBundle:
     signals: Dict[str, Any]
     dataframe: pd.DataFrame
     ai_text: Optional[str]
+    ai_requested: bool = False
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
 
 
 @dataclass
@@ -458,6 +465,9 @@ class StockAnalysisService:
             include_ai=include_ai,
         )
         ai_text: Optional[str] = None
+        ai_requested = bool(include_ai and analyzer.llm)
+        ai_provider = analyzer.llm_base_url if ai_requested else None
+        ai_model = analyzer.llm_model if ai_requested else None
         if include_ai and analyzer.llm and progress_callback:
             progress_callback("generate_ai_report", 85, "正在生成 AI 分析报告", {"stock_code": normalized})
 
@@ -496,6 +506,9 @@ class StockAnalysisService:
             signals=signals,
             dataframe=dataframe,
             ai_text=ai_text,
+            ai_requested=ai_requested,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
         )
 
     def get_analysis_progress(self, request_id: str) -> AnalysisProgressResponse:
@@ -581,11 +594,11 @@ class StockAnalysisService:
             timestamp=_now_utc(),
         )
         ai_insight = AIInsight(
-            enabled=include_ai and bundle.analyzer.llm is not None,
+            enabled=include_ai and (bundle.ai_requested or bool(bundle.ai_text)),
             content=bundle.ai_text,
-            provider=bundle.analyzer.llm_base_url if bundle.analyzer.llm else None,
-            model=bundle.analyzer.llm_model if bundle.analyzer.llm else None,
-            error=None if bundle.ai_text or bundle.analyzer.llm is None or not include_ai else "AI analysis returned empty content",
+            provider=bundle.ai_provider,
+            model=bundle.ai_model,
+            error=None if bundle.ai_text or not bundle.ai_requested or not include_ai else "AI analysis returned empty content",
         )
         response = StockAnalysisResponse(
             stock_name=quote.stock_name,
@@ -911,6 +924,7 @@ class NewsService:
 class WebSearchService:
     GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
     DDG_HTML = "https://html.duckduckgo.com/html/"
+    SOURCE_ONLY_TITLES = {"财富号", "百家号", "搜狐号", "腾讯新闻", "网易号", "头条号", "雪球", "股吧"}
 
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
@@ -942,7 +956,7 @@ class WebSearchService:
         seen_urls: set[str] = set()
         for item in records:
             normalized_url = item.url.strip()
-            if not normalized_url or normalized_url in seen_urls:
+            if not normalized_url or normalized_url in seen_urls or self._is_source_only_title(item.title):
                 continue
             seen_urls.add(normalized_url)
             deduped.append(item)
@@ -1026,6 +1040,11 @@ class WebSearchService:
     @staticmethod
     def _strip_html(value: str) -> str:
         return BeautifulSoup(value, "html.parser").get_text(" ", strip=True)
+
+    @staticmethod
+    def _is_source_only_title(title: str) -> bool:
+        normalized = re.sub(r"\s+", "", title or "")
+        return normalized in WebSearchService.SOURCE_ONLY_TITLES
 
     @staticmethod
     def _domain_from_url(value: str) -> str:
@@ -1585,7 +1604,7 @@ class PortfolioStore:
     def update_position(self, position_id: int, position: PortfolioPosition) -> PortfolioPosition:
         now = _now_utc().isoformat()
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE portfolio_positions
                 SET stock_code = ?, stock_name = ?, cost_price = ?, quantity = ?, weight_pct = ?, updated_at = ?
@@ -1601,6 +1620,8 @@ class PortfolioStore:
                     position_id,
                 ),
             )
+            if cursor.rowcount == 0:
+                raise NotFoundError(f"Portfolio position {position_id} not found")
         return PortfolioPosition(
             id=position_id,
             stock_code=normalize_stock_code(position.stock_code),
@@ -1613,7 +1634,9 @@ class PortfolioStore:
 
     def delete_position(self, position_id: int) -> None:
         with self._connect() as connection:
-            connection.execute("DELETE FROM portfolio_positions WHERE id = ?", (position_id,))
+            cursor = connection.execute("DELETE FROM portfolio_positions WHERE id = ?", (position_id,))
+            if cursor.rowcount == 0:
+                raise NotFoundError(f"Portfolio position {position_id} not found")
 
 
 class StrategyHoldingStore:
@@ -1750,7 +1773,7 @@ class StrategyHoldingStore:
         entry_date = holding.entry_date or now[:10]
         exit_price, exit_date = self._normalize_exit_fields(holding, now)
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE strategy_holdings
                 SET strategy_key = ?, stock_code = ?, stock_name = ?, entry_price = ?,
@@ -1781,6 +1804,8 @@ class StrategyHoldingStore:
                     holding_id,
                 ),
             )
+            if cursor.rowcount == 0:
+                raise NotFoundError(f"Strategy holding {holding_id} not found")
         return StrategyHolding(
             id=holding_id,
             strategy_key=holding.strategy_key,
@@ -1821,7 +1846,9 @@ class StrategyHoldingStore:
 
     def delete_holding(self, holding_id: int) -> None:
         with self._connect() as connection:
-            connection.execute("DELETE FROM strategy_holdings WHERE id = ?", (holding_id,))
+            cursor = connection.execute("DELETE FROM strategy_holdings WHERE id = ?", (holding_id,))
+            if cursor.rowcount == 0:
+                raise NotFoundError(f"Strategy holding {holding_id} not found")
 
     def _normalize_exit_fields(self, holding: StrategyHolding, now: str) -> Tuple[Optional[float], Optional[str]]:
         if holding.status != "exited":
@@ -2146,6 +2173,7 @@ class StrategyService:
             {"code": holding.stock_code, "name": holding.stock_name},
             "market",
             None,
+            market_regime=market_regime,
         )
         exit_price = holding.exit_price if holding.status == "exited" else None
         current_price = float(candidate.metadata.get("current_price") or 0.0)
@@ -2479,7 +2507,13 @@ class StrategyService:
             if is_a_share_individual_stock(info["code"])
         ]
 
-    def _score_candidate(self, candidate: Dict[str, str], scope: str, topic: Optional[str]) -> StrategyCandidate:
+    def _score_candidate(
+        self,
+        candidate: Dict[str, str],
+        scope: str,
+        topic: Optional[str],
+        market_regime: Optional[MarketRegimeResponse] = None,
+    ) -> StrategyCandidate:
         analysis = self.stock_service.get_stock_analysis(candidate["code"], include_ai=False)
         news_items = self.news_service.get_stock_news(candidate["code"], candidate["name"], limit=5)
         chart_series = analysis.chart_series[-120:] if analysis.chart_series else []
@@ -2495,7 +2529,11 @@ class StrategyService:
         recent_low = min(closes) if closes else current_price
         average_volume = sum(volumes[:-5]) / max(len(volumes[:-5]), 1) if len(volumes) > 5 else (sum(volumes) / max(len(volumes), 1) if volumes else 0)
         latest_volume = volumes[-1] if volumes else 0
-        impact_score = sum(int(item.impact_level) for item in news_items[:3])
+        impact_score = sum(int(item.impact_level) for item in news_items[:5])
+        direct_news_count = sum(1 for item in news_items if item.relation_type == "direct")
+        topic_news_count = max(0, len(news_items) - direct_news_count)
+        bullish_news_count = sum(1 for item in news_items if item.sentiment == "bullish")
+        bearish_news_count = sum(1 for item in news_items if item.sentiment == "bearish")
         earnings_mentions = sum(token in news_text for token in ["业绩", "净利润", "营收", "预增", "增长", "订单", "中标"])
         institutional_mentions = sum(token in news_text for token in ["机构", "增持", "回购", "基金", "北向", "社保", "券商"])
         price_vs_ma20_pct = ((current_price - ma20) / ma20 * 100) if ma20 else 0
@@ -2514,12 +2552,19 @@ class StrategyService:
         volume_ratio = (latest_volume / average_volume) if average_volume else 1
         s_score = 86 if volume_ratio >= 1.8 else 78 if volume_ratio >= 1.3 else 68 if volume_ratio >= 1.0 else 48
         l_score = min(95, max(40, analysis.signal_summary.overall_score * 18 + (8 if rsi >= 55 else 0)))
-        i_score = 80 if impact_score >= 9 else 66 if impact_score >= 5 else 50
+        attention_score = impact_score + direct_news_count * 2 + institutional_mentions * 4 + bullish_news_count * 2 - bearish_news_count * 2
+        i_score = 84 if attention_score >= 18 else 76 if attention_score >= 13 else 66 if attention_score >= 8 else 50
         i_score = min(95, i_score + institutional_mentions * 4)
-        market_proxy = "偏强" if scope == "hotspot" else "中性"
-        if current_price < ma60 and analysis.signal_summary.overall_score <= 2:
-            market_proxy = "偏弱"
-        m_score = 78 if scope == "hotspot" and current_price >= ma20 else 68 if current_price >= ma60 else 52
+        market_proxy, market_score, market_note = self._score_market_context(
+            market_regime=market_regime,
+            scope=scope,
+            current_price=current_price,
+            ma20=ma20,
+            ma60=ma60,
+            signal_score=analysis.signal_summary.overall_score,
+            volume_ratio=volume_ratio,
+        )
+        m_score = market_score
 
         total = round(
             c_score * 0.12
@@ -2547,8 +2592,17 @@ class StrategyService:
             "n": f"距阶段高点回撤 {drawdown_from_high_pct:.1f}%，{'已接近突破位' if near_breakout else '尚未接近突破位'}。",
             "s": f"量比近似 {volume_ratio:.2f}，最新成交量{'放大' if volume_ratio >= 1.2 else '未明显放大'}。",
             "l": f"技术总信号 {analysis.signal_summary.overall_signal} / {analysis.signal_summary.overall_score}，RSI {rsi:.1f}。",
-            "i": f"近 5 条消息累计影响分 {impact_score}，机构/资金类信号 {institutional_mentions} 个，市场关注度{'较高' if i_score >= 70 else '一般'}。",
-            "m": f"市场环境代理为 {market_proxy}，{'热点主题加分' if scope == 'hotspot' else '按全市场中性口径处理'}。",
+            "i": self._build_institutional_note(
+                news_items=news_items,
+                impact_score=impact_score,
+                institutional_mentions=institutional_mentions,
+                direct_news_count=direct_news_count,
+                topic_news_count=topic_news_count,
+                bullish_news_count=bullish_news_count,
+                bearish_news_count=bearish_news_count,
+                i_score=i_score,
+            ),
+            "m": f"市场环境为 {market_proxy}，{market_note}",
         }
 
         reasons: List[str] = []
@@ -2605,6 +2659,90 @@ class StrategyService:
                 "symbol": extract_symbol(analysis.stock_code),
             },
         )
+
+    def _build_institutional_note(
+        self,
+        news_items: List[NewsItem],
+        impact_score: int,
+        institutional_mentions: int,
+        direct_news_count: int,
+        topic_news_count: int,
+        bullish_news_count: int,
+        bearish_news_count: int,
+        i_score: float,
+    ) -> str:
+        if not news_items:
+            return "近 5 条个股消息暂无有效样本，机构/资金类信号 0 个，市场关注度偏低。"
+
+        if bullish_news_count > bearish_news_count:
+            sentiment_note = "情绪偏积极"
+        elif bearish_news_count > bullish_news_count:
+            sentiment_note = "情绪偏谨慎"
+        else:
+            sentiment_note = "情绪中性"
+
+        title = news_items[0].title.strip()
+        catalyst = f"，最新关注点：{self._compact_note_text(title, 28)}" if title else ""
+        attention = "较高" if i_score >= 75 else "中等" if i_score >= 62 else "偏低"
+        return (
+            f"近 {len(news_items)} 条个股消息累计影响分 {impact_score}，"
+            f"直接消息 {direct_news_count} 条、主题联动 {topic_news_count} 条，"
+            f"机构/资金类信号 {institutional_mentions} 个，{sentiment_note}，市场关注度{attention}{catalyst}。"
+        )
+
+    def _score_market_context(
+        self,
+        market_regime: Optional[MarketRegimeResponse],
+        scope: str,
+        current_price: float,
+        ma20: float,
+        ma60: float,
+        signal_score: int,
+        volume_ratio: float,
+    ) -> Tuple[str, float, str]:
+        if market_regime:
+            regime_label = {
+                "risk_on": "偏强",
+                "neutral": "中性",
+                "risk_off": "偏弱",
+            }.get(market_regime.regime, "中性")
+            base_score = float(market_regime.score or 50)
+        else:
+            regime_label = "偏强" if scope == "hotspot" else "中性"
+            base_score = 72 if scope == "hotspot" else 58
+
+        above_ma20 = current_price >= ma20 if ma20 else False
+        above_ma60 = current_price >= ma60 if ma60 else False
+        if above_ma20 and signal_score >= 3:
+            alignment_delta = 10
+            alignment = "个股趋势顺应市场"
+        elif above_ma60:
+            alignment_delta = 4
+            alignment = "个股中期结构尚可"
+        elif signal_score <= 2:
+            alignment_delta = -12
+            alignment = "个股技术面弱于市场"
+        else:
+            alignment_delta = -4
+            alignment = "个股短线仍需确认"
+
+        if volume_ratio >= 1.5 and above_ma20:
+            alignment_delta += 4
+            alignment = f"{alignment}，且放量配合"
+        if scope == "hotspot":
+            alignment_delta += 4
+
+        score = round(max(35, min(92, base_score + alignment_delta)), 1)
+        basis = "来自市场环境卡片" if market_regime else ("热点主题加分" if scope == "hotspot" else "未取得市场环境，使用中性基准")
+        note = f"{basis}；{alignment}，M 分随个股趋势调整为 {score:.1f}。"
+        return regime_label, score, note
+
+    @staticmethod
+    def _compact_note_text(text: str, max_length: int) -> str:
+        normalized = re.sub(r"\s+", " ", text).strip()
+        if len(normalized) <= max_length:
+            return normalized
+        return f"{normalized[:max_length]}..."
 
     def _evaluate_thesis_status(
         self,

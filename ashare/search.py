@@ -4,6 +4,7 @@
 提供智能股票搜索功能，支持多种搜索方式和数据源
 """
 
+import os
 import re
 import requests
 from typing import Dict, List, Optional
@@ -23,16 +24,43 @@ from ashare.stock_pool import (
 class StockSearcher:
     """智能股票搜索器"""
 
-    EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
-    EASTMONEY_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8"
-    SINA_SUGGEST_URL = "https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key="
-    ONLINE_TIMEOUT = 5
+    DEFAULT_EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+    DEFAULT_SINA_SUGGEST_URL = "https://suggest3.sinajs.cn/suggest/type=11,12,13,14,15&key="
+    DEFAULT_ONLINE_TIMEOUT = 5
     
     def __init__(self):
         """初始化搜索器"""
         self.base_stock_db = self._load_stock_db()
         self.search_cache = {}
         self.cache_expiry = 3600  # 缓存1小时
+        self.eastmoney_suggest_url = self._env_text(
+            "EASTMONEY_SUGGEST_URL",
+            self.DEFAULT_EASTMONEY_SUGGEST_URL,
+        )
+        self.eastmoney_token = self._env_text("EASTMONEY_TOKEN", "")
+        self.sina_suggest_url = self._env_text(
+            "SINA_SUGGEST_URL",
+            self.DEFAULT_SINA_SUGGEST_URL,
+        )
+        self.online_timeout = self._env_int("ONLINE_TIMEOUT", self.DEFAULT_ONLINE_TIMEOUT)
+
+    @staticmethod
+    def _env_text(name: str, default: str) -> str:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        stripped = value.strip()
+        return stripped or default
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        try:
+            return max(1, int(value.strip()))
+        except ValueError:
+            return default
 
     def _load_stock_db(self) -> Dict[str, Dict[str, str]]:
         stock_db = get_base_stock_catalog()
@@ -231,19 +259,22 @@ class StockSearcher:
         return []
 
     def _search_eastmoney(self, query: str) -> List[Dict]:
+        if not self.eastmoney_token:
+            return []
+
         params = {
             "input": query,
             "type": "14",
-            "token": self.EASTMONEY_TOKEN,
+            "token": self.eastmoney_token,
             "count": "10",
         }
         headers = {"User-Agent": "Mozilla/5.0"}
         try:
             response = requests.get(
-                self.EASTMONEY_SUGGEST_URL,
+                self.eastmoney_suggest_url,
                 params=params,
                 headers=headers,
-                timeout=self.ONLINE_TIMEOUT,
+                timeout=self.online_timeout,
             )
             response.raise_for_status()
             payload = response.json()
@@ -332,9 +363,9 @@ class StockSearcher:
         headers = {"User-Agent": "Mozilla/5.0"}
         try:
             response = requests.get(
-                f"{self.SINA_SUGGEST_URL}{symbol}",
+                f"{self.sina_suggest_url}{symbol}",
                 headers=headers,
-                timeout=self.ONLINE_TIMEOUT,
+                timeout=self.online_timeout,
             )
             response.raise_for_status()
         except requests.RequestException:

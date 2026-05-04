@@ -122,6 +122,17 @@ def _bounded_limit(value: int, *, default: int, minimum: int = 1, maximum: int) 
     return max(minimum, min(normalized, maximum))
 
 
+def _format_web_result_for_agent(item: Any) -> str:
+    title = str(getattr(item, "title", "") or "").strip()
+    source = str(getattr(item, "source", "") or "").strip()
+    published_at = str(getattr(item, "published_at", "") or "").strip()
+    if source and source not in title:
+        title = f"{title}（{source}）"
+    if published_at:
+        title = f"{title} [{published_at[:16]}]"
+    return title
+
+
 def create_agent(
     *,
     api_key: Optional[str] = None,
@@ -252,7 +263,7 @@ def create_agent(
             deps.report("tool_completed", 65, "网页检索已完成", {"tool": "web_search"})
             if not results:
                 return "No web results."
-            return "Web results: " + "; ".join(r.title[:50] for r in results[:3])
+            return "Web results: " + "; ".join(_format_web_result_for_agent(r)[:90] for r in results[:3])
         except Exception as e:
             return f"Web search failed: {e}"
 

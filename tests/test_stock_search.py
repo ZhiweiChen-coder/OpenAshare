@@ -34,8 +34,10 @@ def test_search_stocks_uses_online_result_for_unknown_code(monkeypatch):
         )
 
     monkeypatch.setattr("ashare.search.requests.get", fake_get)
+    monkeypatch.setattr("ashare.search.get_base_stock_catalog", lambda: {})
     monkeypatch.setattr("ashare.search.load_stock_pool", lambda: {})
     monkeypatch.setattr("ashare.search.save_stock_pool", lambda stock_pool: None)
+    monkeypatch.setenv("EASTMONEY_TOKEN", "test-token")
     searcher = StockSearcher()
 
     results = searcher.search_stocks("sh688256", max_results=5)
@@ -66,8 +68,10 @@ def test_get_stock_info_resolves_online_name(monkeypatch):
         )
 
     monkeypatch.setattr("ashare.search.requests.get", fake_get)
+    monkeypatch.setattr("ashare.search.get_base_stock_catalog", lambda: {})
     monkeypatch.setattr("ashare.search.load_stock_pool", lambda: {})
     monkeypatch.setattr("ashare.search.save_stock_pool", lambda stock_pool: None)
+    monkeypatch.setenv("EASTMONEY_TOKEN", "test-token")
     searcher = StockSearcher()
 
     info = searcher.get_stock_info("sh688256")
@@ -113,10 +117,24 @@ def test_online_result_is_persisted_to_local_stock_pool(monkeypatch):
         saved.update(stock_pool)
 
     monkeypatch.setattr("ashare.search.requests.get", fake_get)
+    monkeypatch.setattr("ashare.search.get_base_stock_catalog", lambda: {})
     monkeypatch.setattr("ashare.search.load_stock_pool", lambda: {})
     monkeypatch.setattr("ashare.search.save_stock_pool", fake_save)
+    monkeypatch.setenv("EASTMONEY_TOKEN", "test-token")
 
     searcher = StockSearcher()
     searcher.search_stocks("sh688256", max_results=5)
 
     assert saved["寒武纪"] == "sh688256"
+
+
+def test_eastmoney_search_is_skipped_without_token(monkeypatch):
+    def fake_get(url, params=None, headers=None, timeout=None):
+        raise AssertionError("Eastmoney request should not run without EASTMONEY_TOKEN")
+
+    monkeypatch.delenv("EASTMONEY_TOKEN", raising=False)
+    monkeypatch.setattr("ashare.search.requests.get", fake_get)
+
+    searcher = StockSearcher()
+
+    assert searcher._search_eastmoney("sh688256") == []

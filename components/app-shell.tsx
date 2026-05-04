@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 import { AgentChat } from "@/components/agent-chat";
 import { useDemoAccess } from "@/components/demo-access-provider";
@@ -124,15 +124,17 @@ function useAppShell() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isLanding = pathname === "/";
+  const isPreviewCapture = searchParams.get("preview") === "1";
   const { sidebarOpen, isMobile, sidebarWidth, isResizing, startResize } = useAppShell();
   const shellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
   } as CSSProperties;
 
-  if (isLanding) {
+  if (isLanding || isPreviewCapture) {
     return (
-      <div className="app-shell landing-shell">
+      <div className={`app-shell ${isLanding ? "landing-shell" : "no-sidebar"}`}>
         <div className="main-content">{children}</div>
       </div>
     );
@@ -172,17 +174,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 const NAV_ITEMS = [
-  { href: "/work", label: "工作台" },
-  { href: "/stocks", label: "单股分析" },
-  { href: "/charts", label: "K 线图" },
-  { href: "/portfolio", label: "持仓页" },
-  { href: "/news", label: "消息页" },
-  { href: "/hotspots", label: "热点页" },
-  { href: "/settings", label: "设置" },
+  { href: "/work", label: "工作台", labelEn: "Workbench" },
+  { href: "/stocks", label: "单股分析", labelEn: "Stocks" },
+  { href: "/charts", label: "K 线图", labelEn: "Charts" },
+  { href: "/portfolio", label: "持仓页", labelEn: "Portfolio" },
+  { href: "/news", label: "消息页", labelEn: "News" },
+  { href: "/hotspots", label: "热点页", labelEn: "Hotspots" },
+  { href: "/settings", label: "设置", labelEn: "Settings" },
 ] as const;
 
 export function Nav() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [visible, setVisible] = useState(false);
@@ -192,6 +195,7 @@ export function Nav() {
 
   const activePath = useMemo(() => pathname ?? "/", [pathname]);
   const isLanding = activePath === "/";
+  const interfaceLanguage = searchParams.get("lang") === "en" ? "en" : "zh";
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -223,13 +227,42 @@ export function Nav() {
   }, [activePath, pendingHref]);
 
   function handleNavStart(href: string) {
-    if (href === activePath) {
+    const nextPath = href.split("?")[0] || href;
+    if (nextPath === activePath) {
       setMobileMenuOpen(false);
       return;
     }
-    setPendingHref(href);
+    setPendingHref(nextPath);
     setMobileMenuOpen(false);
   }
+
+  const isPreviewCapture = searchParams.get("preview") === "1";
+  const mobileMenuLabel = mobileMenuOpen
+    ? interfaceLanguage === "en"
+      ? "Close"
+      : "关闭菜单"
+    : interfaceLanguage === "en"
+      ? "Menu"
+      : "菜单";
+  const agentStateLabel = sidebarOpen
+    ? interfaceLanguage === "en"
+      ? "Collapse"
+      : "收起"
+    : interfaceLanguage === "en"
+      ? "Expand"
+      : "展开";
+  const demoButtonLabel = loaded
+    ? unlocked
+      ? interfaceLanguage === "en"
+        ? "Demo unlocked"
+        : "演示已解锁"
+      : interfaceLanguage === "en"
+        ? "Unlock demo"
+        : "解锁演示"
+    : interfaceLanguage === "en"
+      ? "Checking access"
+      : "检查访问";
+  const revokeDemoLabel = interfaceLanguage === "en" ? "Exit demo" : "退出演示";
 
   return (
     <nav className="nav">
@@ -243,14 +276,20 @@ export function Nav() {
           </span>
           <span className="logo-text">
             <span className="logo-name">OpenAshare</span>
-            <span className="logo-tag">A 股原生智能引擎</span>
+            <span className="logo-tag">
+              {interfaceLanguage === "en" ? "AI A-share workstation" : "A 股原生智能引擎"}
+            </span>
           </span>
         </Link>
 
         <div className="nav-actions">
           {isLanding ? (
-            <Link href="/work" className="nav-landing-link" onClick={() => handleNavStart("/work")}>
-              进入工作台
+            <Link
+              href={interfaceLanguage === "en" ? "/work?lang=en" : "/work"}
+              className="nav-landing-link"
+              onClick={() => handleNavStart(interfaceLanguage === "en" ? "/work?lang=en" : "/work")}
+            >
+              {interfaceLanguage === "en" ? "Open workspace" : "进入工作台"}
             </Link>
           ) : (
             <>
@@ -261,18 +300,20 @@ export function Nav() {
                 aria-controls="nav-links-panel"
                 onClick={() => setMobileMenuOpen((open) => !open)}
               >
-                {mobileMenuOpen ? "关闭菜单" : "菜单"}
+                {mobileMenuLabel}
               </button>
-              <button
-                type="button"
-                className={`nav-agent-toggle ${sidebarOpen ? "open" : "closed"}`}
-                aria-expanded={sidebarOpen}
-                aria-controls="agent-sidebar"
-                onClick={toggleSidebar}
-              >
-                <span className="nav-agent-toggle-label">Agent</span>
-                <span className="nav-agent-toggle-state">{sidebarOpen ? "收起" : "展开"}</span>
-              </button>
+              {isPreviewCapture ? null : (
+                <button
+                  type="button"
+                  className={`nav-agent-toggle ${sidebarOpen ? "open" : "closed"}`}
+                  aria-expanded={sidebarOpen}
+                  aria-controls="agent-sidebar"
+                  onClick={toggleSidebar}
+                >
+                  <span className="nav-agent-toggle-label">Agent</span>
+                  <span className="nav-agent-toggle-state">{agentStateLabel}</span>
+                </button>
+              )}
               <div id="nav-links-panel" className={`nav-links-panel ${mobileMenuOpen ? "open" : ""}`}>
                 <div className="nav-links">
                   {NAV_ITEMS.map((item) => (
@@ -282,24 +323,28 @@ export function Nav() {
                       onClick={() => handleNavStart(item.href)}
                       className={activePath === item.href ? "active" : undefined}
                     >
-                      {item.label}
+                      {interfaceLanguage === "en" ? item.labelEn : item.label}
                     </Link>
                   ))}
-                  <button
-                    type="button"
-                    className={`nav-demo-button ${unlocked ? "active" : ""}`}
-                    onClick={() => {
-                      setMobileMenuOpen(false);
-                      openDialog();
-                    }}
-                  >
-                    {loaded ? (unlocked ? "演示已解锁" : "解锁演示") : "检查访问"}
-                  </button>
-                  {unlocked ? (
-                    <button type="button" className="nav-demo-link" onClick={revoke}>
-                      退出演示
-                    </button>
-                  ) : null}
+                  {isPreviewCapture ? null : (
+                    <>
+                      <button
+                        type="button"
+                        className={`nav-demo-button ${unlocked ? "active" : ""}`}
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          openDialog();
+                        }}
+                      >
+                        {demoButtonLabel}
+                      </button>
+                      {unlocked ? (
+                        <button type="button" className="nav-demo-link" onClick={revoke}>
+                          {revokeDemoLabel}
+                        </button>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </div>
             </>

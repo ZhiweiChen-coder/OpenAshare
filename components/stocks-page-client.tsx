@@ -230,7 +230,6 @@ export function StocksPageClient({
                   <th>股票</th>
                   <th>市场</th>
                   <th>分类</th>
-                  <th>评分</th>
                 </tr>
               </thead>
               <tbody>
@@ -243,7 +242,6 @@ export function StocksPageClient({
                     </td>
                     <td data-label="市场">{item.market}</td>
                     <td data-label="分类">{item.category || "-"}</td>
-                    <td data-label="评分">{item.score}</td>
                   </tr>
                 ))}
               </tbody>
@@ -261,9 +259,7 @@ export function StocksPageClient({
               <h3 style={{ marginTop: 12 }}>
                 {selected.name} ({selected.code})
               </h3>
-              <p className="muted">
-                匹配方式：{formatMatchType(selected.match_type)}，搜索评分 {selected.score}
-              </p>
+              <p className="muted">匹配方式：{formatMatchType(selected.match_type)}</p>
             </>
           ) : (
             <p className="muted">还没有选中股票。</p>
@@ -350,7 +346,13 @@ export function StocksPageClient({
                   description="解锁后可以查看更长的 AI 观点、结论和操作建议。"
                 />
               ) : shouldLoadAi && analysis.ai_insight.enabled ? (
-                <AICarousel content={analysis.ai_insight.content || analysis.ai_insight.error || ""} />
+                <AICarousel
+                  content={analysis.ai_insight.content || analysis.ai_insight.error || ""}
+                  stockName={analysis.stock_name}
+                  stockCode={analysis.stock_code}
+                  provider={analysis.ai_insight.provider}
+                  model={analysis.ai_insight.model}
+                />
               ) : shouldLoadAi ? (
                 <p className="muted">当前未配置 LLM API，已保留纯技术分析链路。</p>
               ) : (

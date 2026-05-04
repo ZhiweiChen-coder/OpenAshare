@@ -38,11 +38,12 @@ function apiBaseUrl(): string {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = apiBaseUrl();
   const url = base ? `${base}${path}` : path;
+  const method = (init?.method ?? "GET").toUpperCase();
   let response: Response;
   try {
     response = await fetch(url, {
       ...init,
-      cache: "no-store",
+      cache: init?.cache ?? (method === "GET" || method === "HEAD" ? "default" : "no-store"),
       headers: {
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
@@ -221,7 +222,7 @@ export function searchStocksWithOptions(
   if (options?.requestId) {
     params.set("request_id", options.requestId);
   }
-  return request(`/api/stocks/search?${params.toString()}`);
+  return request(`/api/stocks/search?${params.toString()}`, options?.requestId ? { cache: "no-store" } : undefined);
 }
 
 export function getStockAnalysis(
@@ -237,7 +238,10 @@ export function getStockAnalysis(
     params.set("request_id", options.requestId);
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return request(`/api/stocks/${encodeURIComponent(code)}/analysis${suffix}`, options?.requestInit);
+  return request(`/api/stocks/${encodeURIComponent(code)}/analysis${suffix}`, {
+    ...(options?.requestInit ?? {}),
+    cache: includeAi ? "no-store" : options?.requestInit?.cache ?? "default",
+  });
 }
 
 export function getStockNews(code: string): Promise<NewsItem[]> {
@@ -245,7 +249,7 @@ export function getStockNews(code: string): Promise<NewsItem[]> {
 }
 
 export function getStockAnalysisProgress(requestId: string): Promise<AnalysisProgressResponse> {
-  return request(`/api/stocks/progress/${encodeURIComponent(requestId)}`);
+  return request(`/api/stocks/progress/${encodeURIComponent(requestId)}`, { cache: "no-store" });
 }
 
 export function getHotspots(): Promise<HotspotItem[]> {
@@ -269,11 +273,14 @@ export function getMarketRegime(options?: { requestInit?: RequestInit }): Promis
 }
 
 export function getPortfolioAnalysis(options?: { requestInit?: RequestInit }): Promise<PortfolioAnalysisResponse> {
-  return request("/api/portfolio/analysis", options?.requestInit);
+  return request("/api/portfolio/analysis", {
+    ...(options?.requestInit ?? {}),
+    cache: "no-store",
+  });
 }
 
 export function getUserSettings(): Promise<UserSettingsResponse> {
-  return request("/api/settings");
+  return request("/api/settings", { cache: "no-store" });
 }
 
 export function updateUserSettings(payload: {
@@ -288,7 +295,10 @@ export function updateUserSettings(payload: {
 }
 
 export function listPortfolioPositions(options?: { requestInit?: RequestInit }): Promise<PortfolioPosition[]> {
-  return request("/api/portfolio", options?.requestInit);
+  return request("/api/portfolio", {
+    ...(options?.requestInit ?? {}),
+    cache: "no-store",
+  });
 }
 
 export function createPortfolioPosition(position: PortfolioPosition): Promise<PortfolioPosition> {
@@ -332,7 +342,10 @@ export function getCanSlimScreen(options?: {
 }
 
 export function listStrategyHoldings(options?: { requestInit?: RequestInit }): Promise<StrategyHolding[]> {
-  return request("/api/strategy-holdings", options?.requestInit);
+  return request("/api/strategy-holdings", {
+    ...(options?.requestInit ?? {}),
+    cache: "no-store",
+  });
 }
 
 export function createStrategyHolding(payload: StrategyHolding): Promise<StrategyHolding> {
@@ -358,7 +371,10 @@ export async function deleteStrategyHolding(id: number): Promise<void> {
 export function getStrategyHoldingsAnalysis(options?: {
   requestInit?: RequestInit;
 }): Promise<StrategyHoldingAnalysisResponse> {
-  return requestWithTimeout("/api/strategy-holdings/analysis", 8000, options?.requestInit);
+  return requestWithTimeout("/api/strategy-holdings/analysis", 8000, {
+    ...(options?.requestInit ?? {}),
+    cache: "no-store",
+  });
 }
 
 export function refreshStrategyHoldings(options?: {

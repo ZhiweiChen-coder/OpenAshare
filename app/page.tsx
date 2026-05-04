@@ -1,148 +1,332 @@
 import Link from "next/link";
-// Standard image tag used to bypass next/image error.
+
 import styles from "./landing.module.css";
 
-export default function LandingPage() {
+type Language = "zh" | "en";
+
+type LandingPageProps = {
+  searchParams?: Promise<{
+    lang?: string | string[];
+  }>;
+};
+
+const landingCopy: Record<
+  Language,
+  {
+    langAttr: string;
+    switchLabel: string;
+    switchToZh: string;
+    switchToEn: string;
+    kicker: string;
+    title: string;
+    subtitle: string;
+    primaryCta: string;
+    githubCta: string;
+    stats: Array<{ value: string; label: string }>;
+    previewAlt: string;
+    chips: string[];
+    workflowKicker: string;
+    workflowTitle: string;
+    workflows: Array<{ metric: string; title: string; copy: string }>;
+    newsKicker: string;
+    newsTitle: string;
+    newsCopy: string;
+    newsAlt: string;
+    capabilities: string[];
+    modelsKicker: string;
+    modelsTitle: string;
+    modelsCopy: string;
+    models: string[];
+    securityKicker: string;
+    securityTitle: string;
+    securityCopy: string;
+    securityAlt: string;
+    securityItems: Array<{ title: string; copy: string }>;
+  }
+> = {
+  zh: {
+    langAttr: "zh-CN",
+    switchLabel: "语言切换",
+    switchToZh: "中文",
+    switchToEn: "English",
+    kicker: "OpenAshare · A 股原生智能引擎",
+    title: "你的 A 股 AI 研究工作台",
+    subtitle:
+      "OpenAshare 用一个清爽的界面串联单股技术分析、实时消息、板块热点、持仓管理和 Agent 研究记忆，让市场观察更快落到可执行判断。",
+    primaryCta: "进入工作台",
+    githubCta: "查看 GitHub",
+    stats: [
+      { value: "5", label: "核心市场路径" },
+      { value: "自选", label: "模型接入方式" },
+      { value: "本地", label: "优先部署取向" },
+    ],
+    previewAlt: "OpenAshare 市场研究工作台预览",
+    chips: ["市场脉搏", "政策观察", "组合风险"],
+    workflowKicker: "研究链路",
+    workflowTitle: "从信号到决策，不必离开同一个桌面。",
+    workflows: [
+      {
+        metric: "01",
+        title: "单股智能分析",
+        copy: "把 AkShare 行情、技术指标、消息背景和 AI 推理放到一个研究视图里，快速形成判断。",
+      },
+      {
+        metric: "02",
+        title: "跟随市场的消息流",
+        copy: "跟踪政策、公告、行业异动和公司催化，减少来回切换页面带来的研究噪音。",
+      },
+      {
+        metric: "03",
+        title: "理解持仓的 Agent",
+        copy: "围绕持仓、自选股和热点主题持续追问，让 Agent 更贴近你的交易节奏。",
+      },
+    ],
+    newsKicker: "信息优势",
+    newsTitle: "让市场语境贴在图表旁边，而不是散落在另一个应用里。",
+    newsCopy: "单股研究、消息解读、热点追踪和后续追问彼此联动，每一次阅读都能自然进入下一步行动。",
+    newsAlt: "OpenAshare 市场消息流界面",
+    capabilities: ["A 股单股分析", "实时市场消息", "热点发现", "持仓监控", "Agent 研究记忆", "私有化部署"],
+    modelsKicker: "模型自由",
+    modelsTitle: "接入适合你研究习惯的 AI 能力。",
+    modelsCopy: "无论使用云端 API、私有接口还是本地开源模型，都可以让 OpenAshare 作为稳定的市场工作台。",
+    models: ["DeepSeek", "GPT-4o", "Claude", "Qwen", "Kimi", "Ollama", "GLM", "Yi"],
+    securityKicker: "默认支持自托管",
+    securityTitle: "在自己的环境里运行 OpenAshare。",
+    securityCopy:
+      "OpenAshare 面向希望拥有严肃市场工具，同时保留 API Key、模型选择、自选股、持仓语境和基础设施控制权的人。",
+    securityAlt: "OpenAshare 市场研究工作台截图",
+    securityItems: [
+      {
+        title: "私有配置",
+        copy: "模型供应商、密钥和部署环境都留在你自己的边界内。",
+      },
+      {
+        title: "本地研究记忆",
+        copy: "让 Agent 逐步适应你的工作流，同时保留你需要的数据边界。",
+      },
+    ],
+  },
+  en: {
+    langAttr: "en",
+    switchLabel: "Language switcher",
+    switchToZh: "中文",
+    switchToEn: "English",
+    kicker: "OpenAshare for A-share research",
+    title: "An AI market workstation for sharper China equity decisions.",
+    subtitle:
+      "OpenAshare brings stock analysis, market news, sector hotspots, portfolio context, and an agent research layer into one focused workspace for A-share investors and builders.",
+    primaryCta: "Open workspace",
+    githubCta: "View on GitHub",
+    stats: [
+      { value: "5", label: "Core market paths" },
+      { value: "BYO", label: "Model provider" },
+      { value: "Local", label: "First by design" },
+    ],
+    previewAlt: "OpenAshare dashboard with market research panels",
+    chips: ["Market pulse", "Policy watch", "Portfolio risk"],
+    workflowKicker: "Research flow",
+    workflowTitle: "From signal to decision, without leaving the desk.",
+    workflows: [
+      {
+        metric: "01",
+        title: "Single-stock intelligence",
+        copy: "Combine AkShare data, technical indicators, news context, and AI reasoning in one opinionated research view.",
+      },
+      {
+        metric: "02",
+        title: "News that moves with the market",
+        copy: "Track policy, announcements, sector shifts, and company catalysts without turning research into tab management.",
+      },
+      {
+        metric: "03",
+        title: "Portfolio-aware agent chat",
+        copy: "Ask about holdings, hotspots, and watchlist names while keeping the analysis close to your own market process.",
+      },
+    ],
+    newsKicker: "Information edge",
+    newsTitle: "Market context beside the chart, not buried in another app.",
+    newsCopy:
+      "Keep stock research, news interpretation, hotspot tracking, and follow-up questions connected, so every read has a place to turn into an action.",
+    newsAlt: "OpenAshare market news feed",
+    capabilities: [
+      "A-share stock analysis",
+      "Live market news",
+      "Hotspot discovery",
+      "Portfolio monitoring",
+      "Agent research memory",
+      "Self-hosted deployment",
+    ],
+    modelsKicker: "Model freedom",
+    modelsTitle: "Bring the AI stack that fits your research style.",
+    modelsCopy:
+      "Use cloud APIs, private endpoints, or local open models while keeping OpenAshare as the market-facing workspace.",
+    models: ["DeepSeek", "GPT-4o", "Claude", "Qwen", "Kimi", "Ollama", "GLM", "Yi"],
+    securityKicker: "Self-hostable by default",
+    securityTitle: "Run OpenAshare in your own environment.",
+    securityCopy:
+      "OpenAshare is built for people who want serious market tooling without giving up control of keys, model choices, watchlists, portfolio context, or infrastructure.",
+    securityAlt: "OpenAshare market research workspace screenshot",
+    securityItems: [
+      {
+        title: "Private configuration",
+        copy: "Keep provider keys and deployment decisions in your own environment.",
+      },
+      {
+        title: "Local research memory",
+        copy: "Let the agent adapt to your workflow while preserving your preferred boundaries.",
+      },
+    ],
+  },
+};
+
+function resolveLanguage(lang: string | string[] | undefined): Language {
+  const value = Array.isArray(lang) ? lang[0] : lang;
+  return value === "en" ? "en" : "zh";
+}
+
+export default async function LandingPage({ searchParams }: LandingPageProps) {
+  const params = await searchParams;
+  const language = resolveLanguage(params?.lang);
+  const copy = landingCopy[language];
+  const dashboardImageSrc = language === "en" ? "/home-en.png" : "/home.png";
+
   return (
-    <div className={styles.container}>
-      <div className={styles.gradientBg} aria-hidden="true" />
+    <main className={styles.container} lang={copy.langAttr}>
+      <div className={styles.marketGrid} aria-hidden="true" />
 
-      <section className={styles.heroContent}>
-        <div className={styles.badge}>A股原生智能引擎 OpenAshare</div>
+      <section className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <div className={styles.topline}>
+            <p className={styles.kicker}>{copy.kicker}</p>
+            <nav className={styles.languageSwitch} aria-label={copy.switchLabel}>
+              <Link
+                href="/"
+                className={`${styles.languageOption} ${language === "zh" ? styles.activeLanguage : ""}`}
+                aria-current={language === "zh" ? "page" : undefined}
+              >
+                {copy.switchToZh}
+              </Link>
+              <Link
+                href="/?lang=en"
+                className={`${styles.languageOption} ${language === "en" ? styles.activeLanguage : ""}`}
+                aria-current={language === "en" ? "page" : undefined}
+              >
+                {copy.switchToEn}
+              </Link>
+            </nav>
+          </div>
 
-        <h1 className={styles.title}>
-          你的专属 <span className={styles.titleHighlight}>AI 交易助手</span>
-        </h1>
+          <h1 className={styles.title}>{copy.title}</h1>
+          <p className={styles.subtitle}>{copy.subtitle}</p>
 
-        <p className={styles.subtitle}>
-          OpenAshare 用一个极简、直接的界面串联单股技术分析、实时消息流、板块热点追踪与持仓管理，
-          搭配本地优先的 Agent 记忆，让系统越用越懂你的交易节奏。
-        </p>
+          <div className={styles.actionGroup}>
+            <Link href={language === "en" ? "/work?lang=en" : "/work"} className={styles.btnPrimary}>
+              {copy.primaryCta}
+            </Link>
+            <a
+              href="https://github.com/ZhiweiChen-coder/OpenAshare"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.btnGithub}
+            >
+              <svg height="20" viewBox="0 0 16 16" width="20" fill="currentColor" aria-hidden="true">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+              {copy.githubCta}
+            </a>
+          </div>
 
-        <div className={styles.actionGroup}>
-          <Link href="/dashboard" className={styles.btnPrimary}>
-            进入工作台
-          </Link>
-          <a
-            href="https://github.com/ZhiweiChen-coder/OpenAshare"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.btnGithub}
-          >
-            <svg height="22" viewBox="0 0 16 16" width="22" fill="currentColor">
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
-            </svg>
-            GitHub Star
-          </a>
+          <dl className={styles.heroStats} aria-label="OpenAshare product coverage">
+            {copy.stats.map((stat) => (
+              <div key={stat.label}>
+                <dt>{stat.value}</dt>
+                <dd>{stat.label}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
-        <div className={styles.heroMockupWrapper}>
+        <div className={styles.heroVisual} aria-label={copy.previewAlt}>
           <img
-            src="/home.png"
-            alt="OpenAshare Home Dashboard"
+            src={dashboardImageSrc}
+            alt={copy.previewAlt}
             width={1200}
             height={700}
             className={styles.heroImage}
           />
-        </div>
-      </section>
-
-      <section className={styles.featureSection}>
-        <div className={styles.featureWrapper}>
-          <div className={styles.featureContent}>
-            <h2>
-              强大的市场面板
-              <br />
-              尽在掌握之中
-            </h2>
-            <ul className={styles.featureList}>
-              <li>
-                <strong>智能技术解盘</strong>
-                <p>
-                  结合 AkShare 的行情与指标数据，AI Agent 自动识别趋势结构、支撑阻力与关键形态，
-                  让单股分析更快进入可执行结论。
-                </p>
-              </li>
-              <li>
-                <strong>全景消息捕捉</strong>
-                <p>
-                  从宏观政策、行业异动到个股公告，系统自动提炼重点，把噪音压缩成更适合交易决策的摘要。
-                </p>
-              </li>
-              <li>
-                <strong>联动代理分析</strong>
-                <p>
-                  随时调起专属 Agent 联合分析单股、热点和持仓，快速生成下一步观察方向与行动建议。
-                </p>
-              </li>
-            </ul>
-          </div>
-          <div className={styles.featureMockup}>
-            <img src="/news.png" alt="News Feed" className={styles.featureImage} />
+          <div className={styles.tickerStrip} aria-hidden="true">
+            {copy.chips.map((chip) => (
+              <span key={chip}>{chip}</span>
+            ))}
           </div>
         </div>
       </section>
 
-      <section className={styles.modelsSection}>
+      <section className={styles.workflows} aria-labelledby="workflow-heading">
+        <div className={styles.sectionIntro}>
+          <p className={styles.kicker}>{copy.workflowKicker}</p>
+          <h2 id="workflow-heading">{copy.workflowTitle}</h2>
+        </div>
+        <div className={styles.workflowGrid}>
+          {copy.workflows.map((item) => (
+            <article className={styles.workflowCard} key={item.title}>
+              <span>{item.metric}</span>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.newsSection} aria-labelledby="news-heading">
+        <div className={styles.newsCopy}>
+          <p className={styles.kicker}>{copy.newsKicker}</p>
+          <h2 id="news-heading">{copy.newsTitle}</h2>
+          <p>{copy.newsCopy}</p>
+          <div className={styles.capabilityGrid}>
+            {copy.capabilities.map((capability) => (
+              <span key={capability}>{capability}</span>
+            ))}
+          </div>
+        </div>
+        <div className={styles.newsVisual}>
+          <img src="/news.png" alt={copy.newsAlt} width={1024} height={567} />
+        </div>
+      </section>
+
+      <section className={styles.modelsSection} aria-labelledby="models-heading">
         <div className={styles.modelsHeader}>
-          <h2>任意主流模型，自由接入</h2>
-          <p>
-            无论使用云端 API 还是本地部署模型，都可以按你的偏好切换配置，
-            让研究链路保持灵活，同时不被单一供应商锁定。
-          </p>
+          <p className={styles.kicker}>{copy.modelsKicker}</p>
+          <h2 id="models-heading">{copy.modelsTitle}</h2>
+          <p>{copy.modelsCopy}</p>
         </div>
-        <div className={styles.logoGrid}>
-          <div className={styles.logoItem}>DeepSeek</div>
-          <div className={styles.logoItem}>GPT-4o</div>
-          <div className={styles.logoItem}>Claude 3.5</div>
-          <div className={styles.logoItem}>Qwen Max</div>
-          <div className={styles.logoItem}>Kimi</div>
-          <div className={styles.logoItem}>Ollama</div>
-          <div className={styles.logoItem}>GLM-4</div>
-          <div className={styles.logoItem}>Yi</div>
+        <div className={styles.logoGrid} aria-label="Supported model examples">
+          {copy.models.map((model) => (
+            <span className={styles.logoItem} key={model}>
+              {model}
+            </span>
+          ))}
         </div>
       </section>
 
-      <section className={styles.securitySection}>
-        <div className={styles.securityHeader}>
-          <h2>本地优先，私有与安全并重</h2>
+      <section className={styles.securitySection} aria-labelledby="security-heading">
+        <div className={styles.securityVisual}>
+          <img src={dashboardImageSrc} alt={copy.securityAlt} width={1200} height={700} />
         </div>
-
-        <div className={styles.securityMockup}>
-          <div className={styles.laptopFrame}>
-            <div className={styles.screen}>
-              <div className={styles.screenInner}></div>
-            </div>
-            <div className={styles.keyboard}></div>
-            <div className={styles.badgeLocal}>Local</div>
-            <div className={styles.badgePrivate}>Private</div>
-            <div className={styles.badgeSecure}>Secure</div>
-          </div>
-        </div>
-
-        <div className={styles.securityGrid}>
-          <div className={styles.securityCard}>
-            <h3>自托管模型</h3>
-            <p>
-              你可以自行选择运行环境，接入私有 API Key，或直接驱动本地开源模型，
-              把分析能力和成本控制权留在自己手里。
-            </p>
-          </div>
-          <div className={styles.securityCard}>
-            <h3>数据主权</h3>
-            <p>
-              自选股、持仓、技术观察点与会话记忆优先保留在本地与私有环境中，
-              更适合对研究过程和数据边界有要求的使用场景。
-            </p>
-          </div>
-          <div className={styles.securityCard}>
-            <h3>私有化部署</h3>
-            <p>
-              支持离线运行、局域网共享与私有云部署，既能开放协作，也能按你的基础设施约束落地。
-            </p>
+        <div className={styles.securityCopy}>
+          <p className={styles.kicker}>{copy.securityKicker}</p>
+          <h2 id="security-heading">{copy.securityTitle}</h2>
+          <p>{copy.securityCopy}</p>
+          <div className={styles.securityGrid}>
+            {copy.securityItems.map((item) => (
+              <div key={item.title}>
+                <h3>{item.title}</h3>
+                <p>{item.copy}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
-    </div>
+    </main>
   );
 }

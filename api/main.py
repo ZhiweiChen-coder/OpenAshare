@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sqlite3
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, List, Optional
 from pathlib import Path
@@ -45,7 +46,18 @@ from api.schemas import (
 )
 from api.sse import encode_sse, sse_response
 from api.settings_store import UserSettingsStore
-from api.services import AgentService, HotspotService, MarketService, NewsService, PortfolioService, StockAnalysisService, StrategyService, WebSearchService
+from api.services import (
+    AgentService,
+    HotspotService,
+    MarketService,
+    NewsService,
+    NotFoundError,
+    PortfolioService,
+    StockAnalysisService,
+    StrategyService,
+    WebSearchService,
+)
+from api.agent_pydantic import AgentDeps, create_agent, run_agent_async
 from ashare.config import PROJECT_ROOT
 
 settings_store = UserSettingsStore(PROJECT_ROOT / "data" / "user_settings.json")
@@ -116,6 +128,10 @@ def _require_demo_access(request: Request, feature_name: str) -> None:
     raise HTTPException(status_code=403, detail=f"{feature_name}需要先解锁演示访问。")
 
 
+def _raise_not_found(exc: NotFoundError) -> None:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 def _build_etag(payload: Any) -> str:
     encoded = jsonable_encoder(payload)
     raw = json.dumps(encoded, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -128,12 +144,22 @@ def _cached_json_response(
     *,
     max_age: int,
     stale_while_revalidate: int = 120,
+    private: bool = False,
+    no_store: bool = False,
+    vary: Optional[str] = None,
 ) -> Response:
     etag = _build_etag(payload)
+    if no_store:
+        cache_control = "private, no-store"
+    else:
+        scope = "private" if private else "public"
+        cache_control = f"{scope}, max-age={max_age}, stale-while-revalidate={stale_while_revalidate}"
     headers = {
-        "Cache-Control": f"public, max-age={max_age}, stale-while-revalidate={stale_while_revalidate}",
+        "Cache-Control": cache_control,
         "ETag": etag,
     }
+    if vary:
+        headers["Vary"] = vary
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=headers)
     return JSONResponse(content=jsonable_encoder(payload), headers=headers)
@@ -284,11 +310,18 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Log unhandled exceptions and return 500 with a JSON body so the client gets a message."""
-    logger.exception("Unhandled exception: %s", exc)
+    """Log unhandled exceptions without exposing internals to clients."""
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    logger.error(
+        "Unhandled exception request_id=%s method=%s path=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__},
+        content={"detail": "Internal server error", "request_id": request_id},
     )
 
 
@@ -569,9 +602,18 @@ _pydantic_agent_signature: Optional[tuple[str, str, str]] = None
 
 
 def _load_agent_runtime():
-    from api.agent_pydantic import AgentDeps, create_agent, run_agent_async
-
     return AgentDeps, create_agent, run_agent_async
+
+
+def _build_agent_deps() -> AgentDeps:
+    AgentDeps, _, _ = _load_agent_runtime()
+    return AgentDeps(
+        stock_service=stock_service,
+        news_service=news_service,
+        hotspot_service=hotspot_service,
+        portfolio_service=portfolio_service,
+        web_search_service=web_search_service,
+    )
 
 
 def _get_pydantic_agent():
@@ -588,23 +630,17 @@ def _get_pydantic_agent():
         runtime_config.llm_model,
     )
     if _pydantic_agent is not None and _pydantic_agent_signature == signature:
-        return _pydantic_agent, _agent_deps
+        return _pydantic_agent, _build_agent_deps()
     try:
-        AgentDeps, create_agent, _ = _load_agent_runtime()
+        _, create_agent, _ = _load_agent_runtime()
         _pydantic_agent = create_agent(
             api_key=runtime_config.llm_api_key,
             base_url=runtime_config.llm_base_url,
             model=runtime_config.llm_model,
         )
-        _agent_deps = AgentDeps(
-            stock_service=stock_service,
-            news_service=news_service,
-            hotspot_service=hotspot_service,
-            portfolio_service=portfolio_service,
-            web_search_service=web_search_service,
-        )
+        _agent_deps = None
         _pydantic_agent_signature = signature
-        return _pydantic_agent, _agent_deps
+        return _pydantic_agent, _build_agent_deps()
     except Exception:
         _pydantic_agent_signature = None
         return None, None
@@ -683,7 +719,14 @@ def get_stock_analysis(
             payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai, request_id=request_id)
         else:
             payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai)
-        return _cached_json_response(request, payload, max_age=120, stale_while_revalidate=240)
+        return _cached_json_response(
+            request,
+            payload,
+            max_age=120,
+            stale_while_revalidate=240,
+            no_store=include_ai,
+            vary="Cookie" if include_ai else None,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -863,13 +906,19 @@ def create_portfolio_position(request: Request, position: PortfolioPosition) -> 
 @app.put("/api/portfolio/positions/{position_id}", response_model=PortfolioPosition)
 def update_portfolio_position(request: Request, position_id: int, position: PortfolioPosition) -> PortfolioPosition:
     _require_demo_access(request, "持仓管理")
-    return portfolio_service.update_position(position_id, position)
+    try:
+        return portfolio_service.update_position(position_id, position)
+    except NotFoundError as exc:
+        _raise_not_found(exc)
 
 
 @app.delete("/api/portfolio/positions/{position_id}", status_code=204)
 def delete_portfolio_position(request: Request, position_id: int) -> Response:
     _require_demo_access(request, "持仓管理")
-    portfolio_service.delete_position(position_id)
+    try:
+        portfolio_service.delete_position(position_id)
+    except NotFoundError as exc:
+        _raise_not_found(exc)
     return Response(status_code=204)
 
 
@@ -906,13 +955,19 @@ def refresh_strategy_holdings(request: Request) -> StrategyHoldingAnalysisRespon
 @app.put("/api/strategy-holdings/{holding_id}", response_model=StrategyHolding)
 def update_strategy_holding(request: Request, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
     _require_demo_access(request, "策略持股")
-    return strategy_service.update_holding(holding_id, holding)
+    try:
+        return strategy_service.update_holding(holding_id, holding)
+    except NotFoundError as exc:
+        _raise_not_found(exc)
 
 
 @app.delete("/api/strategy-holdings/{holding_id}", status_code=204)
 def delete_strategy_holding(request: Request, holding_id: int) -> Response:
     _require_demo_access(request, "策略持股")
-    strategy_service.delete_holding(holding_id)
+    try:
+        strategy_service.delete_holding(holding_id)
+    except NotFoundError as exc:
+        _raise_not_found(exc)
     return Response(status_code=204)
 
 

@@ -4,6 +4,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 delete openashare-api openashare-web",
+    "pm2:flush": "pm2 flush",
     "lint": "next lint"
   },
   "engines": {

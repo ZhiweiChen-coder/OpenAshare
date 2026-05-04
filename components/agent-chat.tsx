@@ -513,10 +513,10 @@ export function AgentChat({ compact = false }: AgentChatProps) {
                   <MarkdownText content={message.content} />
                   {message.response ? <PayloadCards response={message.response} /> : null}
                   {message.actions?.length ? (
-                    <div className="tag-list" style={{ marginTop: 10 }}>
-                      {message.actions.map((action) => (
+                    <div className="tag-list agent-suggested-actions" style={{ marginTop: 10 }}>
+                      {message.actions.slice(0, 3).map((action) => (
                         <button className="tag" key={action} onClick={() => ask(action)} type="button">
-                          {action}
+                          {compactActionLabel(action)}
                         </button>
                       ))}
                     </div>
@@ -804,6 +804,14 @@ function truncate(text: string, maxLength: number) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trim()}...` : normalized;
 }
 
+function compactActionLabel(action: string) {
+  if (action.includes("最新消息")) return "最新消息";
+  if (action.includes("同板块")) return "板块对比";
+  if (action.includes("完整单股分析")) return "完整分析";
+  if (action.includes("全球局势")) return "全球影响";
+  return truncate(action.replace(/^继续问[：:]/, "").trim(), 12);
+}
+
 function inferProgressStages(query: string) {
   if (!query.trim()) {
     return ["理解问题", "调用相关数据", "整理回答"];
@@ -862,14 +870,19 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
   const portfolioHref = `/portfolio?stock_code=${encodeURIComponent(analysis.stock_code)}&stock_name=${encodeURIComponent(
     analysis.stock_name,
   )}&quantity=100&focus=cost&return_to=${encodeURIComponent("/agent")}&return_label=${encodeURIComponent("Agent")}`;
+  const technicalNotes = analysis.technical_commentary?.slice(0, 2) ?? [];
   return (
-    <div className="agent-payload-card">
-      <div className="agent-card-kicker">股票分析</div>
+    <div className="agent-payload-card agent-stock-card">
       <div className="agent-card-head">
-        <h3>
-          {analysis.stock_name} ({analysis.stock_code})
-        </h3>
-        <div className="agent-card-subtitle">把价格、信号和操作放在一个更轻的卡片里。</div>
+        <div>
+          <div className="agent-card-kicker">股票</div>
+          <h3>
+            {analysis.stock_name} <span>{analysis.stock_code}</span>
+          </h3>
+        </div>
+        <span className="agent-signal-pill">
+          {analysis.signal_summary.overall_signal} · {analysis.signal_summary.overall_score}
+        </span>
       </div>
       <div className="agent-card-metrics">
         <div className="agent-card-metric">
@@ -877,36 +890,34 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
           <strong>{analysis.quote.current_price.toFixed(2)}</strong>
         </div>
         <div className="agent-card-metric">
-          <span>信号</span>
-          <strong>
-            {analysis.signal_summary.overall_signal} / {analysis.signal_summary.overall_score}
-          </strong>
+          <span>结论</span>
+          <strong>{analysis.signal_summary.overall_signal}</strong>
         </div>
       </div>
-      {analysis.technical_commentary?.length ? (
-        <div className="tag-list">
-          {analysis.technical_commentary.slice(0, 3).map((item) => (
-            <span className="tag" key={item}>
-              {item}
+      {technicalNotes.length ? (
+        <div className="agent-note-list">
+          {technicalNotes.map((item) => (
+            <span className="agent-note" key={item}>
+              {truncate(item, 20)}
             </span>
           ))}
         </div>
       ) : null}
-      <div className="inline-actions agent-card-actions">
+      <div className="agent-card-actions agent-stock-actions">
         <Link
           href={`/stocks?query=${encodeURIComponent(analysis.stock_code)}&panel=overview#overview`}
           className="button ghost"
         >
-          打开总览
+          总览
         </Link>
-        <StockPanelLink stockCode={analysis.stock_code} panel="ai" className="button ghost">
-          打开 AI 分析
+        <StockPanelLink stockCode={analysis.stock_code} panel="ai" className="button ghost" compactLoading>
+          AI
         </StockPanelLink>
-        <StockPanelLink stockCode={analysis.stock_code} panel="news" className="button ghost">
-          打开相关新闻
+        <StockPanelLink stockCode={analysis.stock_code} panel="news" className="button ghost" compactLoading>
+          新闻
         </StockPanelLink>
         <Link href={portfolioHref} className="button">
-          加入持仓
+          持仓
         </Link>
       </div>
     </div>
