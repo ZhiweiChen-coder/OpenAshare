@@ -253,11 +253,11 @@ export function getStockAnalysisProgress(requestId: string): Promise<AnalysisPro
 }
 
 export function getHotspots(): Promise<HotspotItem[]> {
-  return requestWithTimeout("/api/hotspots", 5000);
+  return requestWithTimeout("/api/hotspots", 9000);
 }
 
 export function getGlobalNews(): Promise<GlobalNewsItem[]> {
-  return requestWithTimeout("/api/news/global", 6000);
+  return requestWithTimeout("/api/news/global", 8000);
 }
 
 export function webSearch(query: string, limit = 8): Promise<WebSearchResult[]> {
@@ -265,7 +265,7 @@ export function webSearch(query: string, limit = 8): Promise<WebSearchResult[]> 
 }
 
 export function getHotspotDetail(topic: string): Promise<HotspotDetailResponse> {
-  return requestWithTimeout(`/api/hotspots/${encodeURIComponent(topic)}`, 5000);
+  return requestWithTimeout(`/api/hotspots/${encodeURIComponent(topic)}`, 9000);
 }
 
 export function getMarketRegime(options?: { requestInit?: RequestInit }): Promise<MarketRegimeResponse> {

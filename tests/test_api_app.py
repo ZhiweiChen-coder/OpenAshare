@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from datetime import datetime, timezone
 import asyncio
 import json
+import time
 
 from fastapi import Request
 from fastapi.testclient import TestClient
@@ -654,6 +655,33 @@ def test_portfolio_store_raises_not_found_for_missing_update_and_delete(tmp_path
         store.delete_position(999)
 
 
+def test_portfolio_analysis_uses_non_ai_stock_analysis(tmp_path):
+    from api.services import PortfolioService, PortfolioStore
+
+    store = PortfolioStore(db_path=str(tmp_path / "portfolio.db"))
+    store.create_position(
+        PortfolioPosition(
+            stock_code="sh600036",
+            stock_name="招商银行",
+            cost_price=40,
+            quantity=100,
+            weight_pct=20,
+        )
+    )
+    calls: list[tuple[str, bool]] = []
+
+    class FakeAnalysisService:
+        def get_stock_analysis(self, code: str, include_ai: bool = True):
+            calls.append((code, include_ai))
+            return _make_stock_analysis(code, "招商银行", 4, "看涨", 42.5, 2.9)
+
+    service = PortfolioService(store=store, analysis_service=FakeAnalysisService())
+    response = service.analyze_portfolio()
+
+    assert calls == [("sh600036", False)]
+    assert response.positions[0].current_price == 42.5
+
+
 def test_strategy_holding_store_raises_not_found_for_missing_update_and_delete(tmp_path):
     from api.services import NotFoundError, StrategyHoldingStore
 
@@ -875,6 +903,31 @@ def test_global_news_service_uses_cache(monkeypatch):
     second = news_service.get_global_news(limit=3)
     assert len(first) == len(second) == 3
     assert call_counter["count"] == 4
+
+
+def test_global_news_fetches_sources_concurrently(monkeypatch):
+    news_service._response_cache.clear()
+
+    def fake_fetch(dataset_name):
+        time.sleep(0.2)
+        return pd.DataFrame(
+            [
+                {
+                    "标题": f"{dataset_name} OpenAI 扩大算力合作",
+                    "摘要": "AI 算力链继续升温",
+                    "发布时间": "2026-03-12T00:00:00Z",
+                }
+            ]
+        )
+
+    monkeypatch.setattr("api.main.news_service.tracker._fetch_ak_news", fake_fetch)
+
+    started_at = time.monotonic()
+    result = news_service.get_global_news(limit=4)
+    elapsed = time.monotonic() - started_at
+
+    assert len(result) == 4
+    assert elapsed < 0.6
 
 
 def test_global_news_endpoint_supports_etag(monkeypatch):

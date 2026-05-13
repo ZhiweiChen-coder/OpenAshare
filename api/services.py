@@ -6,7 +6,7 @@ import time
 import re
 from threading import Lock, Thread
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, wait
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -636,6 +636,8 @@ class StockAnalysisService:
 
 
 class NewsService:
+    GLOBAL_NEWS_TIMEOUT_SEC = 3.2
+
     def __init__(self, config: Optional[Config] = None):
         self.config = config or Config()
         self.state_store = MonitorStateStore(self.config.monitor_db_path)
@@ -697,12 +699,20 @@ class NewsService:
             ("同花顺", lambda: self.tracker._fetch_ak_news("stock_info_global_ths")),
         ]
 
-        for source_name, fetch_fn in sources:
-            data_frame = self._call_with_timeout(fetch_fn, timeout_sec=2.5)
-            try:
-                records.extend(self._normalize_global_news_dataframe(data_frame, source_name))
-            except Exception:
-                pass  # skip this source if normalization fails (e.g. column mismatch)
+        executor = ThreadPoolExecutor(max_workers=len(sources))
+        try:
+            future_sources = {executor.submit(fetch_fn): source_name for source_name, fetch_fn in sources}
+            done, pending = wait(future_sources, timeout=self.GLOBAL_NEWS_TIMEOUT_SEC)
+            for future in pending:
+                future.cancel()
+            for future in done:
+                source_name = future_sources[future]
+                try:
+                    records.extend(self._normalize_global_news_dataframe(future.result(), source_name))
+                except Exception:
+                    pass  # skip this source if fetching or normalization fails
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         if not records:
             try:
@@ -1859,10 +1869,15 @@ class StrategyHoldingStore:
 
 
 class PortfolioService:
-    def __init__(self, config: Optional[Config] = None, store: Optional[PortfolioStore] = None):
+    def __init__(
+        self,
+        config: Optional[Config] = None,
+        store: Optional[PortfolioStore] = None,
+        analysis_service: Optional[StockAnalysisService] = None,
+    ):
         self.config = config or Config()
         self.store = store or PortfolioStore()
-        self.analysis_service = StockAnalysisService(self.config)
+        self.analysis_service = analysis_service or StockAnalysisService(self.config)
 
     def list_positions(self) -> List[PortfolioPosition]:
         return self.store.list_positions()
@@ -1896,7 +1911,7 @@ class PortfolioService:
         high_risk_count = 0
 
         for position in positions:
-            stock_analysis = self.analysis_service.get_stock_analysis(position.stock_code)
+            stock_analysis = self.analysis_service.get_stock_analysis(position.stock_code, include_ai=False)
             current_price = stock_analysis.quote.current_price
             market_value = current_price * position.quantity
             cost = position.cost_price * position.quantity
