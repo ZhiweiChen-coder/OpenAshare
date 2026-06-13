@@ -26,6 +26,8 @@ export function HotspotsPageClient() {
   const [marketRegimeError, setMarketRegimeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [strategyPanelOpen, setStrategyPanelOpen] = useState(false);
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const detailRequestRef = useRef(0);
   const screeningRequestRef = useRef(0);
   const screeningCarouselRef = useRef<HTMLDivElement | null>(null);
@@ -139,6 +141,11 @@ export function HotspotsPageClient() {
   }, [selectedTopic?.topic_name, loadDetail]);
 
   useEffect(() => {
+    setStrategyPanelOpen(false);
+    setHistoryPanelOpen(false);
+  }, [selectedTopic?.topic_name]);
+
+  useEffect(() => {
     if (screenScope === "hotspot" && selectedTopic?.topic_name) {
       loadScreening("hotspot", selectedTopic.topic_name);
       return;
@@ -210,7 +217,7 @@ export function HotspotsPageClient() {
         <div className="section-kicker">Sector Radar</div>
         <h1>热点板块</h1>
         <p className="muted">
-          从板块视角梳理当前市场最热的交易方向，结合代表个股、催化消息和热度变化，帮你快速锁定值得跟踪的主题。
+          按交易活跃、讨论度和消息催化排序，先看哪些值得关注，哪些需要警惕。
         </p>
       </section>
 
@@ -257,6 +264,7 @@ export function HotspotsPageClient() {
                   {sortedHotspots.map((item, index) => {
                     const active = item.topic_name === selectedTopic?.topic_name;
                     const linkedStocks = summarizeLinkedStocks(item);
+                    const breakdown = normalizeHotspotBreakdown(item);
                     return (
                       <Link
                         className={`hotspot-board-item ${active ? "active" : ""}`}
@@ -268,18 +276,24 @@ export function HotspotsPageClient() {
                         <div className="hotspot-board-content">
                           <div className="hotspot-board-topline">
                             <div className="hotspot-title-block">
-                              <span className="hotspot-eyebrow">Sector Pulse</span>
+                              <span className="hotspot-eyebrow">Market Attention</span>
                               <h3>{item.topic_name}</h3>
                             </div>
                             <div className="hotspot-heat-pill">
-                              <span>热度</span>
+                              <span>综合</span>
                               <strong>{item.heat_score.toFixed(0)}</strong>
                             </div>
                           </div>
-                          <p>{truncate(item.ai_summary || item.reason, 120)}</p>
+                          <p>{truncate(item.ai_summary || item.reason, 86)}</p>
                           <div className="hotspot-meta-row">
-                            <span className={`hotspot-trend-pill hotspot-trend-pill-${item.trend_direction}`}>
-                              {trendLabel(item.trend_direction)}
+                            <span className={`hotspot-attention-pill hotspot-attention-${breakdown.attention_level}`}>
+                              {attentionLabel(breakdown.attention_level)}
+                            </span>
+                            <span className="hotspot-stock-count">
+                              交易 {breakdown.trading_activity.toFixed(1)}
+                            </span>
+                            <span className="hotspot-stock-count">
+                              讨论 {breakdown.discussion_heat.toFixed(1)}
                             </span>
                             <span className="hotspot-stock-count">
                               代表股 {linkedStocks.visible.length + linkedStocks.extraCount}
@@ -333,32 +347,50 @@ export function HotspotsPageClient() {
                 {detailLoading ? <p className="muted">详情更新中，先展示上一版内容…</p> : null}
                 <div className="stack">
                   <div className="hotspot-detail-summary">
-                    <p>{currentDetail.topic.ai_summary || currentDetail.topic.reason}</p>
+                    <p>{truncate(currentDetail.topic.ai_summary || currentDetail.topic.reason, 128)}</p>
                   </div>
 
                   <div className="metric-grid">
                     <div className="hotspot-metric">
-                      <span>热度趋势</span>
-                      <strong>{trendLabel(currentDetail.topic.trend_direction)}</strong>
+                      <span>关注判断</span>
+                      <strong>{attentionLabel(normalizeHotspotBreakdown(currentDetail.topic).attention_level)}</strong>
                     </div>
                     <div className="hotspot-metric">
-                      <span>关联个股</span>
-                      <strong>{currentDetail.topic.related_stocks.length}</strong>
+                      <span>交易活跃</span>
+                      <strong>{normalizeHotspotBreakdown(currentDetail.topic).trading_activity.toFixed(1)}</strong>
                     </div>
                     <div className="hotspot-metric">
-                      <span>催化消息</span>
-                      <strong>{currentDetail.related_news.length}</strong>
+                      <span>讨论热度</span>
+                      <strong>{normalizeHotspotBreakdown(currentDetail.topic).discussion_heat.toFixed(1)}</strong>
+                    </div>
+                    <div className="hotspot-metric">
+                      <span>消息催化</span>
+                      <strong>{normalizeHotspotBreakdown(currentDetail.topic).news_heat.toFixed(1)}</strong>
                     </div>
                   </div>
 
+                  {normalizeHotspotBreakdown(currentDetail.topic).basis.length ? (
+                    <div className="hotspot-basis-box">
+                      <div className="detail-block-head">
+                        <h3>为什么排在这里</h3>
+                        <span className="muted">交易活跃 + 讨论度 + 消息催化</span>
+                      </div>
+                      <div className="tag-list">
+                        {normalizeHotspotBreakdown(currentDetail.topic).basis.slice(0, 2).map((item) => (
+                          <span className="tag" key={item}>{item}</span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <section className="detail-block">
                     <div className="detail-block-head">
-                      <h3>板块关联个股</h3>
-                      <span className="muted">板块内优先关注的代表标的</span>
+                      <h3>代表股</h3>
+                      <span className="muted">先看前三只</span>
                     </div>
                     {currentDetail.topic.related_stocks.length ? (
                       <div className="stock-link-list">
-                        {currentDetail.topic.related_stocks.map((stock) => (
+                        {currentDetail.topic.related_stocks.slice(0, 3).map((stock) => (
                           <div className="stock-link-card" key={`${currentDetail.topic.topic_name}-${stock.stock_code}`}>
                             <div>
                               <strong>
@@ -383,18 +415,32 @@ export function HotspotsPageClient() {
                             </div>
                           </div>
                         ))}
+                        {currentDetail.topic.related_stocks.length > 3 ? (
+                          <p className="muted">其余 {currentDetail.topic.related_stocks.length - 3} 只已收起，先处理上面的代表股。</p>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="muted">暂无关联股票。</p>
                     )}
                   </section>
 
-                  <section className="detail-block">
-                    <div className="detail-block-head">
+                  <section className="hotspot-compact-section">
+                    <button
+                      className="hotspot-compact-toggle"
+                      type="button"
+                      onClick={() => setStrategyPanelOpen((current) => !current)}
+                      aria-expanded={strategyPanelOpen}
+                    >
                       <div>
                         <h3>CAN SLIM 选股</h3>
-                        <span className="muted">默认先看热点内筛选，再切到全市场候选。</span>
+                        <span className="muted">{strategyPanelOpen ? "收起候选和交易计划草案" : "展开后查看候选和交易计划草案"}</span>
                       </div>
+                      <span className="pill">{screenCandidates.length || 0} 只</span>
+                    </button>
+                    {strategyPanelOpen ? (
+                      <div className="detail-block hotspot-compact-body">
+                      <div className="detail-block-head">
+                        <span className="muted">默认先看热点内筛选，再切到全市场候选。</span>
                       <div className="inline-actions">
                         <button
                           className={`button ${screenScope === "hotspot" ? "" : "ghost"}`}
@@ -526,16 +572,18 @@ export function HotspotsPageClient() {
                     ) : (
                       <p className="muted">当前没有可用的策略候选结果。</p>
                     )}
+                      </div>
+                    ) : null}
                   </section>
 
                   <section className="detail-block">
                     <div className="detail-block-head">
-                      <h3>板块催化消息</h3>
-                      <span className="muted">只保留标题、来源、摘要和影响级别</span>
+                      <h3>最新催化</h3>
+                      <span className="muted">只显示最相关 1 条</span>
                     </div>
                     {currentDetail.related_news.length ? (
                       <div className="detail-news-list">
-                        {currentDetail.related_news.slice(0, 6).map((item) => (
+                        {currentDetail.related_news.slice(0, 1).map((item) => (
                           <article className="detail-news-item" key={item.id}>
                             <div className="detail-news-meta">
                               <span>{item.source}</span>
@@ -543,33 +591,48 @@ export function HotspotsPageClient() {
                               <span>影响 {item.impact_level}</span>
                             </div>
                             <h4>{item.title}</h4>
-                            <p>{truncate(item.summary, 180)}</p>
+                            <p>{truncate(item.summary, 120)}</p>
                           </article>
                         ))}
+                        {currentDetail.related_news.length > 1 ? (
+                          <p className="muted">其余 {currentDetail.related_news.length - 1} 条催化消息已收起。</p>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="muted">当前没有抓到与该板块直接相关的最新消息。</p>
                     )}
                   </section>
 
-                  <section className="detail-block">
-                    <div className="detail-block-head">
-                      <h3>板块热度快照</h3>
-                      <span className="muted">看板块热度是否持续升温</span>
-                    </div>
-                    {currentDetail.history.length ? (
-                      <div className="history-strip">
-                        {currentDetail.history.map((item) => (
-                          <div className="history-point" key={item.date}>
-                            <strong>{item.score.toFixed(0)}</strong>
-                            <span>{item.date}</span>
-                            <small>{item.count} 次触发</small>
-                          </div>
-                        ))}
+                  <section className="hotspot-compact-section">
+                    <button
+                      className="hotspot-compact-toggle"
+                      type="button"
+                      onClick={() => setHistoryPanelOpen((current) => !current)}
+                      aria-expanded={historyPanelOpen}
+                    >
+                      <div>
+                        <h3>板块热度快照</h3>
+                        <span className="muted">{historyPanelOpen ? "收起最近触发记录" : "展开看最近触发记录"}</span>
                       </div>
-                    ) : (
-                      <p className="muted">暂无可用历史快照。</p>
-                    )}
+                      <span className="pill">{currentDetail.history.length} 天</span>
+                    </button>
+                    {historyPanelOpen ? (
+                      <div className="detail-block hotspot-compact-body">
+                      {currentDetail.history.length ? (
+                        <div className="history-strip">
+                          {currentDetail.history.map((item) => (
+                            <div className="history-point" key={item.date}>
+                              <strong>{item.score.toFixed(0)}</strong>
+                              <span>{item.date}</span>
+                              <small>{item.count} 次触发</small>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted">暂无可用历史快照。</p>
+                      )}
+                      </div>
+                    ) : null}
                   </section>
                 </div>
               </div>
@@ -620,12 +683,6 @@ function formatDateLabel(value: string) {
   }).format(date);
 }
 
-function trendLabel(direction: HotspotItem["trend_direction"]) {
-  if (direction === "up") return "升温";
-  if (direction === "down") return "降温";
-  return "平稳";
-}
-
 function summarizeLinkedStocks(item: HotspotItem) {
   const seenNames = new Set<string>();
   const visible = item.related_stocks.filter((stock) => {
@@ -640,6 +697,24 @@ function summarizeLinkedStocks(item: HotspotItem) {
     visible: visible.slice(0, 3),
     extraCount: Math.max(visible.length - 3, 0),
   };
+}
+
+function normalizeHotspotBreakdown(item: HotspotItem) {
+  return {
+    trading_activity: item.heat_breakdown?.trading_activity ?? 0,
+    discussion_heat: item.heat_breakdown?.discussion_heat ?? 0,
+    news_heat: item.heat_breakdown?.news_heat ?? 0,
+    alert_count: item.heat_breakdown?.alert_count ?? 0,
+    rank_hits: item.heat_breakdown?.rank_hits ?? 0,
+    attention_level: item.heat_breakdown?.attention_level ?? "watch",
+    basis: item.heat_breakdown?.basis ?? [],
+  };
+}
+
+function attentionLabel(level: HotspotItem["heat_breakdown"]["attention_level"]) {
+  if (level === "focus") return "重点关注";
+  if (level === "caution") return "提高警惕";
+  return "先观察";
 }
 
 function candidateKey(candidate: StrategyCandidate) {

@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>美股科技四大主题：2026 下半年理性投资分析</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #5a667a;
+      --line: #d8dee8;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --blue: #1f6feb;
+      --green: #1b7f4b;
+      --amber: #a56200;
+      --red: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 36px 22px 56px;
+    }
+    header {
+      padding: 28px 0 18px;
+      border-bottom: 2px solid var(--ink);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 38px 0 14px;
+      font-size: 25px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 19px;
+      letter-spacing: 0;
+    }
+    p { margin: 9px 0; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .subtitle {
+      max-width: 900px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+    .stamp {
+      display: inline-block;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .tile {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 15px;
+      min-height: 136px;
+    }
+    .tile strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+    .tile .score {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .note {
+      background: #fff8e6;
+      border: 1px solid #f1d28a;
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: #503a00;
+      margin: 16px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0 18px;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #eef3f9;
+      font-size: 13px;
+      color: #33415c;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .advance { background: #e7f6ed; color: var(--green); }
+    .watch { background: #fff4da; color: var(--amber); }
+    .spec { background: #fce8e6; color: var(--red); }
+    .neutral { background: #eaf0ff; color: #2451a6; }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-top: 14px;
+    }
+    ul { padding-left: 20px; }
+    li { margin: 7px 0; }
+    .small { color: var(--muted); font-size: 13px; }
+    .source-list li { margin: 8px 0; }
+    @media (max-width: 900px) {
+      .grid, .two-col { grid-template-columns: 1fr; }
+      main { padding: 24px 14px 42px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+      th, td { white-space: normal; min-width: 150px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>美股科技四大主题：2026 下半年理性投资分析</h1>
+    <p class="subtitle">覆盖机器人/物理 AI、CPU 与 AI 硬件、存储、量子计算。本文是研究优先级和估值温度框架，不是买卖建议；结论基于截至 2026-06-12 美国市场附近可见的公开信息与新闻源。</p>
+    <span class="stamp">投资视角：中期 6-12 个月，偏基本面 + 催化剂 + 估值纪律。</span>
+  </header>
+
+  <section>
+    <h2>一页结论</h2>
+    <div class="grid">
+      <div class="tile">
+        <strong>最强基本面顺风</strong>
+        <div class="score">存储</div>
+        <p>HBM、企业 SSD、近线 HDD 同时受 AI 数据中心拉动，但涨幅很大，追高需要用合约、价格和供给扩张验证。</p>
+      </div>
+      <div class="tile">
+        <strong>最大利润池</strong>
+        <div class="score">AI 硬件</div>
+        <p>NVDA、AVGO、TSM、ASML、AMD 仍是核心链条；下半年不怕需求差，怕预期太满和指引不够激进。</p>
+      </div>
+      <div class="tile">
+        <strong>分化最明显</strong>
+        <div class="score">机器人</div>
+        <p>真实收入在手术、仓储、自动化测试；人形机器人和物理 AI 更像远期期权，验证点在量产和单位经济。</p>
+      </div>
+      <div class="tile">
+        <strong>最像期权</strong>
+        <div class="score">量子</div>
+        <p>政策和技术里程碑会带来交易性行情，但多数纯量子公司仍是高倍销售额、亏损和融资风险。</p>
+      </div>
+    </div>
+    <div class="note">我的排序：下半年风险调整后优先级为 存储 > AI 硬件 > 机器人/物理 AI > 量子计算。若只看长期技术天花板，量子和人形机器人很诱人；若看 2026 年下半年兑现度，存储和 AI 硬件更硬。</div>
+  </section>
+
+  <section>
+    <h2>板块走势与估值温度</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>板块</th>
+          <th>下半年基础情景</th>
+          <th>估值温度</th>
+          <th>核心验证点</th>
+          <th>最大风险</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>机器人和物理 AI</td>
+          <td>震荡上行但高度分化。真实订单/装机/程序量支持的公司更稳；人形机器人主题更多靠 Tesla 等事件驱动。</td>
+          <td><span class="tag watch">偏贵但分层</span> ISRG 是高质量溢价，TSLA 是可选性溢价，SYM/TER 更看订单兑现。</td>
+          <td>Optimus/robotaxi 进展、仓储自动化 backlog 转收入、da Vinci 程序量、工业自动化订单底部。</td>
+          <td>演示热度不能转化为收入；制造业资本开支下行；监管和安全事故。</td>
+        </tr>
+        <tr>
+          <td>CPU 与 AI 硬件</td>
+          <td>需求仍强，但近期 AVGO 指引引发市场对“beat-and-raise”预期的再定价。下半年更像高波动的基本面牛市。</td>
+          <td><span class="tag neutral">核心龙头不一定最贵</span> NVDA 已被部分资料描述为约 20x forward P/E；AMD/ARM/AVGO 是预期敏感型。</td>
+          <td>Blackwell/Rubin 供给、AMD GPU 第二来源份额、AVGO ASIC 客户集中度、TSM/ASML 产能与价格。</td>
+          <td>云厂商 capex 降速、自研 ASIC 替代、出口限制、利率上行导致长久期压缩。</td>
+        </tr>
+        <tr>
+          <td>存储</td>
+          <td>基本面最顺。DRAM/HBM、NAND、HDD 均从 AI 推理、训练、日志、数据湖受益；但交易已经拥挤。</td>
+          <td><span class="tag advance">盈利倍数仍低但周期性强</span> MU 被报道约 10x forward P/E；WDC/STX/SNDK 涨幅后需防周期顶部估值错觉。</td>
+          <td>DRAM/NAND 合约价、HBM 份额、HDD LTAs、企业 SSD 价格、库存重建。</td>
+          <td>供给扩张、客户双重采购后去库存、AI 资本开支降温、价格涨幅挤压下游需求。</td>
+        </tr>
+        <tr>
+          <td>量子计算</td>
+          <td>技术和政策催化多，股价弹性大；但 2026 年下半年仍不宜按成熟盈利模型估值。</td>
+          <td><span class="tag spec">极高期权价值</span> IONQ/RGTI/QBTS 等更多看 2027-2030 收入折现，纯 PE 不适用。</td>
+          <td>IonQ 256-qubit 里程碑、DARPA/政府项目、D-Wave bookings、Rigetti fidelity/资本开支、IBM/Google 路线图。</td>
+          <td>收入体量太小、亏损扩大、融资稀释、技术路线不确定、新闻驱动后的回撤。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>机器人和物理 AI</h2>
+    <div class="section">
+      <h3>走势判断</h3>
+      <p>下半年主线不是“所有机器人都涨”，而是“能证明落地收入的机器人涨得更稳”。医疗机器人和仓储自动化已经有收入与装机基础；人形机器人和具身智能的天花板更高，但短期估值主要靠里程碑。Tesla 的 Optimus、robotaxi 和 AI 芯片叙事会继续影响板块风险偏好，但目前仍需要把演示、试生产和可规模化利润分开看。</p>
+      <h3>候选标的</h3>
+      <table>
+        <thead><tr><th>标的</th><th>暴露路径</th><th>估值/状态</th><th>下半年看点</th><th>研究优先级</th></tr></thead>
+        <tbody>
+          <tr><td>NVDA</td><td>机器人训练/仿真/边缘计算、Jetson、Isaac、AI 工厂基础设施</td><td>AI 硬件龙头，forward P/E 已从狂热区回落，但仍受数据中心周期支配</td><td>物理 AI 软件栈是否从叙事转订单</td><td><span class="tag advance">A</span></td></tr>
+          <tr><td>TSLA</td><td>Optimus、robotaxi、FSD、边缘推理芯片</td><td>机器人期权大，汽车基本面承压时估值更依赖未来叙事</td><td>Optimus 量产线、Cybercab/robotaxi 城市扩张、监管事件</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>ISRG</td><td>da Vinci 和 Ion 手术机器人</td><td>高质量成长溢价；Q1 2026 程序量和收入增长支持估值</td><td>da Vinci 5 渗透、程序量增长、国际扩张</td><td><span class="tag advance">A</span></td></tr>
+          <tr><td>SYM</td><td>仓储自动化系统，Walmart 等客户</td><td>高增长但客户集中度和项目节奏风险较高</td><td>backlog 转收入、毛利率、客户扩展</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>TER</td><td>协作机器人 Universal Robots/MiR，另有半导体测试</td><td>机器人业务不是唯一驱动，近期更多由 AI 半导体测试支撑</td><td>AI 测试需求与工业机器人周期修复</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>ROK</td><td>工业自动化、工厂控制、制造业数字化</td><td>更像工业周期复苏标的，不是纯 AI 机器人</td><td>制造业 PMI、订单、软件/服务占比</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>AMZN</td><td>仓储机器人、物流自动化、AWS AI 工作负载</td><td>机器人价值被 AWS 和零售主业务稀释</td><td>物流效率改善是否体现在 margin</td><td><span class="tag watch">B</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>CPU 与 AI 硬件</h2>
+    <div class="section">
+      <h3>走势判断</h3>
+      <p>AI 硬件仍是利润池最大的板块，但下半年会从“只要 AI 就重估”转向“谁的订单、产能、毛利和客户集中度能经得住高预期”。近期 Broadcom 即使公布强劲 AI 收入，仍因指引没有超过市场高预期而引发板块波动，这说明估值风险已经从需求证伪转为预期管理。</p>
+      <h3>候选标的</h3>
+      <table>
+        <thead><tr><th>标的</th><th>暴露路径</th><th>估值/状态</th><th>下半年看点</th><th>研究优先级</th></tr></thead>
+        <tbody>
+          <tr><td>NVDA</td><td>GPU、网络、Grace/Vera CPU、AI rack-scale 系统</td><td>资料显示 forward P/E 约 20x，若盈利增长兑现，龙头估值反而不极端</td><td>Blackwell Ultra、Rubin、网络收入、毛利率</td><td><span class="tag advance">A</span></td></tr>
+          <tr><td>AMD</td><td>EPYC CPU、Instinct GPU、AI 第二来源</td><td>股价已反映 GPU 份额提升预期，仍低于 NVDA 生态确定性</td><td>Meta/OpenAI 等大客户份额、MI 系列供给、CPU 份额</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>AVGO</td><td>定制 ASIC、网络、VMware 基础设施软件</td><td>AI ASIC 高成长但客户集中，近期市值回撤显示预期很高</td><td>Google/OpenAI/Anthropic 等 ASIC 订单和指引</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>TSM</td><td>先进制程代工、CoWoS、AI 芯片供应瓶颈</td><td>高质量供应链核心，估值取决于先进节点价格和资本开支回报</td><td>3nm/2nm 价格、CoWoS 扩产、客户 capex</td><td><span class="tag advance">A</span></td></tr>
+          <tr><td>ASML</td><td>EUV/High-NA lithography，先进制程设备瓶颈</td><td>垄断溢价明显，欧洲科技稀缺性强</td><td>EUV 出货、China 限制、客户扩产节奏</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>ARM</td><td>CPU IP，数据中心和边缘 AI 架构授权</td><td>高倍数成长股，估值对授权增长和 royalty rate 很敏感</td><td>服务器 CPU IP 渗透、手机复苏、AI PC</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>INTC</td><td>CPU、foundry、先进封装、潜在 AI 供应链替代</td><td>反转叙事增强，但执行风险仍高</td><td>foundry 客户、制程节点、AI CPU 和封装订单</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>MRVL</td><td>AI 网络、定制芯片、光互连相关 silicon</td><td>估值看 AI 网络增速，周期业务拖累仍需观察</td><td>custom silicon pipeline、云客户订单</td><td><span class="tag watch">B</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>存储后期走势</h2>
+    <div class="section">
+      <h3>走势判断</h3>
+      <p>存储是 2026 下半年最硬的基本面链条之一。AI 推理、长上下文、RAG、日志、训练数据、checkpoint、视频和合成数据都会放大内存与存储需求。与传统周期不同的是，部分客户正在签长期采购协议，库存可见性变强。但这不代表周期消失，股价上涨后，真正的风险是“好消息已被提前资本化”。</p>
+      <h3>候选标的</h3>
+      <table>
+        <thead><tr><th>标的</th><th>暴露路径</th><th>估值/状态</th><th>下半年看点</th><th>研究优先级</th></tr></thead>
+        <tbody>
+          <tr><td>MU</td><td>DRAM、HBM、NAND，AI 内存核心受益者</td><td>报道显示 forward P/E 约 10x，但这是周期高盈利下的低倍数</td><td>HBM 份额、DRAM 合约价、FY2027 盈利峰值可持续性</td><td><span class="tag advance">A</span></td></tr>
+          <tr><td>WDC</td><td>HDD/企业存储，AI 数据湖和冷/温数据</td><td>强需求已被大幅重估，估值需看 2027-2028 LTAs</td><td>HDD 供给售罄、价格、exabyte 增长</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>STX</td><td>近线 HDD，云和 AI 数据中心容量</td><td>与 WDC 类似，经营杠杆高，回撤也会快</td><td>HAMR 量产、云客户 LTAs、毛利率</td><td><span class="tag advance">A-</span></td></tr>
+          <tr><td>SNDK</td><td>NAND/企业 SSD，AI 推理和高性能存储</td><td>涨幅巨大后预期很高，适合等回撤或盈利确认</td><td>NAND 价格、企业 SSD 供给、客户集中</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>PSTG</td><td>全闪存阵列、企业数据云、AI 数据服务</td><td>收入增长强，但组件成本和产品毛利压力需跟踪</td><td>云大客户、subscription ARR、毛利修复</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>NTAP</td><td>企业存储、混合云数据管理</td><td>更稳健，AI 弹性小于 MU/WDC/STX</td><td>AI 数据湖项目、云存储服务增长</td><td><span class="tag watch">B</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>量子计算未来前景</h2>
+    <div class="section">
+      <h3>走势判断</h3>
+      <p>长期看，量子计算可能在材料、药物、优化、密码、金融建模和国防领域形成新计算范式。但 2026 下半年，多数纯量子股票仍是“技术里程碑 + 政策资金 + 风险偏好”的组合，而不是“收入和利润驱动”的组合。适合用小仓位、篮子和事件风控，而不是重仓单一技术路线。</p>
+      <h3>候选标的</h3>
+      <table>
+        <thead><tr><th>标的</th><th>技术/商业路径</th><th>估值/状态</th><th>下半年看点</th><th>研究优先级</th></tr></thead>
+        <tbody>
+          <tr><td>IONQ</td><td> trapped-ion 量子计算、网络、传感、安全</td><td>收入增速高但仍亏损；2026 指引提升至约 2.6-2.7 亿美元</td><td>256-qubit 系统、收购整合、商业客户占比</td><td><span class="tag watch">B+</span></td></tr>
+          <tr><td>RGTI</td><td>超导量子芯片，自有 fab，全栈系统</td><td>报道曾指约 95x 2027E sales，资本开支和技术执行压力高</td><td>fidelity、DARPA/政府项目、现金消耗</td><td><span class="tag spec">C</span></td></tr>
+          <tr><td>QBTS</td><td>量子退火，向 gate-model 扩展</td><td>收入小且波动，bookings 是更重要指标</td><td>系统销售、bookings 转收入、100 logical qubits 路线</td><td><span class="tag watch">B-</span></td></tr>
+          <tr><td>QUBT</td><td>光子/量子软硬件相关，早期商业化</td><td>极高风险小票，估值主要是概念和现金跑道</td><td>真实订单、融资、技术验证</td><td><span class="tag spec">C</span></td></tr>
+          <tr><td>ARQQ</td><td>后量子安全/加密相关</td><td>更偏安全软件/服务期权，财务兑现不足</td><td>政府/企业安全订单、现金流</td><td><span class="tag spec">C</span></td></tr>
+          <tr><td>IBM</td><td>量子云、超导路线、企业客户和研究生态</td><td>盈利型大盘，量子不是估值主驱动</td><td>路线图、企业应用、软件订阅协同</td><td><span class="tag watch">B</span></td></tr>
+          <tr><td>GOOGL/MSFT/HON</td><td>大厂量子研发、云生态、Quantinuum 等暴露</td><td>量子期权被主业覆盖，风险回报更稳但弹性低</td><td>技术突破、云服务商业化、政府项目</td><td><span class="tag watch">B</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>组合化思路</h2>
+    <div class="two-col">
+      <div class="section">
+        <h3>偏稳健</h3>
+        <ul>
+          <li>核心：NVDA、TSM、ASML、MU、ISRG。</li>
+          <li>卫星：AVGO、AMD、WDC/STX、PSTG、TER。</li>
+          <li>量子只用 IBM/GOOGL/MSFT 或小比例 IONQ 观察仓。</li>
+        </ul>
+      </div>
+      <div class="section">
+        <h3>偏进攻</h3>
+        <ul>
+          <li>提高 MU、WDC、STX、AMD、AVGO、TSLA 权重。</li>
+          <li>用 IONQ、RGTI、QBTS 做小仓位事件篮子，而不是单押。</li>
+          <li>严格设置季度验证点：收入指引、订单、价格、现金消耗。</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note">风险纪律：存储和 AI 硬件可以用盈利修正来持有；机器人要用订单和装机验证；量子必须用现金跑道和里程碑验证。没有验证的主题，只能是交易，不应被当成长期复利资产。</div>
+  </section>
+
+  <section>
+    <h2>主要来源</h2>
+    <ul class="source-list small">
+      <li><a href="https://www.barrons.com/articles/nvidia-stock-price-value-dividend-d31e2ba8">Barron's: Nvidia forward P/E and valuation discussion, 2026-06</a></li>
+      <li><a href="https://www.barrons.com/articles/amd-stock-buy-upgrade-cpu-bf9cabdc">Barron's: AMD upgrade, GPU upside and AI revenue expectations, 2026-06-12</a></li>
+      <li><a href="https://www.marketwatch.com/story/intels-stock-could-push-even-higher-thanks-to-this-subtle-dynamic-bofa-says-0615c707">MarketWatch: Intel upgrade and AI CPU/foundry positioning, 2026-06</a></li>
+      <li><a href="https://www.wsj.com/livecoverage/stock-market-today-dow-sp-500-nasdaq-06-04-2026/card/-flash-heard-broadcom-pays-big-for-playing-it-safe-fxwC34FwoIBlXDjKyP3R">WSJ Heard on the Street: Broadcom AI chip revenue and expectations risk, 2026-06</a></li>
+      <li><a href="https://www.marketwatch.com/story/microns-stock-bounces-back-in-a-big-way-the-memory-trade-is-alive-and-well-3466929f">MarketWatch: Micron and memory supply/demand discussion, 2026-06</a></li>
+      <li><a href="https://www.barrons.com/articles/micron-stock-price-target-goldman-earnings-f5f6475b">Barron's: Micron forward P/E and earnings peak debate, 2026-06</a></li>
+      <li><a href="https://www.investors.com/news/technology/seagate-stock-western-digital-stock-ai-price-target-hikes/">Investor's Business Daily: Seagate and Western Digital AI storage demand, 2026-06</a></li>
+      <li><a href="https://www.tomshardware.com/pc-components/hdds/western-digital-is-already-sold-out-of-hard-drives-for-all-of-2026-chief-says-some-long-term-agreements-for-2027-and-2028-already-in-place">Tom's Hardware: Western Digital sold out HDD capacity and LTAs, 2026-02</a></li>
+      <li><a href="https://www.investors.com/news/technology/intuitive-surgical-stock-intuitive-surgical-earnings-q1-2026/">Investor's Business Daily: Intuitive Surgical Q1 2026 procedure and revenue growth</a></li>
+      <li><a href="https://www.investors.com/research/chip-robotics-company-semiconductor-memory-testing-teradyne-stock-ter/">Investor's Business Daily: Teradyne Q1 2026 AI semiconductor test and robotics context</a></li>
+      <li><a href="https://www.investors.com/news/technology/ionq-stock-ionq-earnings-q12026-quantum-computing-stocks/">Investor's Business Daily: IonQ Q1 2026 results and full-year guidance</a></li>
+      <li><a href="https://www.marketwatch.com/story/this-quantum-stock-is-falling-as-the-path-to-success-looks-very-expensive-4cb3cce8">MarketWatch: Rigetti, IonQ and D-Wave sales multiple context, 2026-02</a></li>
+      <li><a href="https://www.barrons.com/articles/d-wave-quantum-earnings-stock-price-67a1e03c">Barron's: D-Wave revenue and bookings, 2026-05</a></li>
+    </ul>
+    <p class="small">注：部分实时市场数据源存在访问限制，因此估值采用公开报道中的倍数、价格与市值片段，并以“估值温度”表达。若用于实际交易，应在下单前用券商、FactSet、Bloomberg、LSEG 或公司财报再次刷新价格、EV、净现金和 forward estimates。</p>
+  </section>
+</main>
+</body>
+</html>

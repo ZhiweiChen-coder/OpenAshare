@@ -257,7 +257,7 @@ export function getHotspots(): Promise<HotspotItem[]> {
 }
 
 export function getGlobalNews(): Promise<GlobalNewsItem[]> {
-  return requestWithTimeout("/api/news/global", 8000);
+  return requestWithTimeout("/api/news/global", 8000, { cache: "no-store" });
 }
 
 export function webSearch(query: string, limit = 8): Promise<WebSearchResult[]> {
@@ -371,7 +371,7 @@ export async function deleteStrategyHolding(id: number): Promise<void> {
 export function getStrategyHoldingsAnalysis(options?: {
   requestInit?: RequestInit;
 }): Promise<StrategyHoldingAnalysisResponse> {
-  return requestWithTimeout("/api/strategy-holdings/analysis", 8000, {
+  return requestWithTimeout("/api/strategy-holdings/analysis", 30000, {
     ...(options?.requestInit ?? {}),
     cache: "no-store",
   });

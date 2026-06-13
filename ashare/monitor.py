@@ -22,7 +22,9 @@ from ashare.stock_pool import (
     extract_symbol,
     get_monitor_support_level,
     infer_market,
+    is_a_share_individual_stock,
     is_hk_stock,
+    is_us_stock,
     normalize_stock_code,
 )
 
@@ -335,7 +337,27 @@ class NewsTracker:
         results: List[Dict[str, Any]] = []
         topic_keywords = self._get_topic_keywords(stock_name, stock_code)
 
-        if not is_hk_stock(stock_code):
+        if is_us_stock(stock_code):
+            # 美股个股新闻走 Finnhub（A股 的巨潮/东财接口只接受数字代码）
+            primary_sources = [
+                (
+                    "Finnhub公司新闻",
+                    lambda: self._fetch_finnhub_company_news(symbol),
+                    lambda df: self._normalize_news_dataframe(
+                        df,
+                        stock_name,
+                        stock_code,
+                        "Finnhub",
+                        topic_keywords,
+                        default_relation_type="direct",
+                    ),
+                ),
+            ]
+            for source_name, fetch_fn, transform_fn in primary_sources:
+                results.extend(
+                    self._collect_source_items(source_name, stock_name, stock_code, fetch_fn, transform_fn)
+                )
+        elif not is_hk_stock(stock_code):
             primary_sources = [
                 (
                     "巨潮资讯公告",
@@ -368,32 +390,35 @@ class NewsTracker:
                 )
 
         # Market-wide feeds are fallback only; keep topic/name filtering.
-        extra_sources = [
-            (
-                "财联社",
-                lambda: ak.stock_info_global_cls(symbol="全部"),
-                lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "财联社"),
-            ),
-            (
-                "财联社快讯",
-                lambda: self._fetch_ak_news("stock_news_main_cx"),
-                lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "财联社快讯"),
-            ),
-            (
-                "新浪财经",
-                lambda: self._fetch_ak_news("stock_info_global_sina"),
-                lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "新浪财经"),
-            ),
-            (
-                "同花顺",
-                lambda: self._fetch_ak_news("stock_info_global_ths"),
-                lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "同花顺"),
-            ),
-        ]
-        for source_name, fetch_fn, transform_fn in extra_sources:
-            results.extend(
-                self._collect_source_items(source_name, stock_name, stock_code, fetch_fn, transform_fn)
-            )
+        # 美股不走中文全市场源：这些 feed 以 A股 资讯为主，按个股名（如“苹果”
+        # 这类常用词）过滤会混入大量无关中文新闻，美股已由 Finnhub 覆盖。
+        if not is_us_stock(stock_code):
+            extra_sources = [
+                (
+                    "财联社",
+                    lambda: ak.stock_info_global_cls(symbol="全部"),
+                    lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "财联社"),
+                ),
+                (
+                    "财联社快讯",
+                    lambda: self._fetch_ak_news("stock_news_main_cx"),
+                    lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "财联社快讯"),
+                ),
+                (
+                    "新浪财经",
+                    lambda: self._fetch_ak_news("stock_info_global_sina"),
+                    lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "新浪财经"),
+                ),
+                (
+                    "同花顺",
+                    lambda: self._fetch_ak_news("stock_info_global_ths"),
+                    lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "同花顺"),
+                ),
+            ]
+            for source_name, fetch_fn, transform_fn in extra_sources:
+                results.extend(
+                    self._collect_source_items(source_name, stock_name, stock_code, fetch_fn, transform_fn)
+                )
 
         # Dedupe by (title, stock_code) keeping first occurrence
         seen_keys: set = set()
@@ -499,6 +524,53 @@ class NewsTracker:
             start_date=start_date,
             end_date=end_date,
         )
+
+    def _fetch_finnhub_company_news(self, symbol: str) -> Optional[pd.DataFrame]:
+        """美股个股新闻：Finnhub company-news。未配置 key 时返回 None。"""
+        api_key = getattr(self.config, "finnhub_api_key", None) if self.config else None
+        if not api_key:
+            return None
+        # Finnhub 用 ``-`` 表示类别股（BRK.B -> BRK-B）
+        finnhub_symbol = symbol.replace(".", "-")
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=self.NOTICE_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+        try:
+            import requests
+
+            resp = requests.get(
+                "https://finnhub.io/api/v1/company-news",
+                params={"symbol": finnhub_symbol, "from": start_date, "to": end_date, "token": api_key},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            logger.warning("Finnhub 公司新闻获取失败 %s: %s", finnhub_symbol, exc)
+            return None
+        if not isinstance(payload, list) or not payload:
+            return None
+        rows = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            ts = item.get("datetime")
+            occurred_at = (
+                datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                if isinstance(ts, (int, float)) and ts > 0
+                else ""
+            )
+            rows.append(
+                {
+                    "title": normalize_text(item.get("headline")),
+                    "content": normalize_text(item.get("summary")),
+                    "source": normalize_text(item.get("source")),
+                    "datetime": occurred_at,
+                    "url": normalize_text(item.get("url")),
+                }
+            )
+        if not rows:
+            return None
+        return pd.DataFrame(rows)
 
     def _collect_source_items(
         self,
@@ -958,7 +1030,8 @@ class MonitorService:
                     pushed_count += pushed
                     generated_count += generated
 
-                if self.config.fund_flow_tracking_enabled and not is_hk_stock(stock_code):
+                # 资金流/龙虎榜是 A股 特有数据，仅对 A股 个股运行（美股/港股跳过）
+                if self.config.fund_flow_tracking_enabled and is_a_share_individual_stock(stock_code):
                     pushed, generated = self._handle_fund_flow(stock_name, stock_code, ranking_map)
                     pushed_count += pushed
                     generated_count += generated

@@ -41,6 +41,7 @@ export function StocksPageClient({
 
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisIncludesAi, setAnalysisIncludesAi] = useState(false);
 
@@ -114,6 +115,7 @@ export function StocksPageClient({
       setAnalysis(null);
       setAnalysisError("");
       setAnalysisLoading(false);
+      setAiLoading(false);
       return () => {
         cancelled = true;
       };
@@ -125,33 +127,66 @@ export function StocksPageClient({
     if (canReuseAnalysis) {
       setAnalysisError("");
       setAnalysisLoading(false);
+      setAiLoading(false);
       return () => {
         cancelled = true;
       };
     }
 
-    setAnalysisLoading(true);
     setAnalysisError("");
 
-    getStockAnalysis(selected.code, { includeAi: shouldLoadAi, requestId: initialRequestId })
-      .then((result) => {
+    // 两段式加载：先用 include_ai=false 快速拿到行情/指标/K 线渲染出来，
+    // 再在后台补充 AI 文本，整个过程图表不会被清空或被进度条接管。
+    if (!sameStockLoaded) {
+      setAnalysisLoading(true);
+      getStockAnalysis(selected.code, { includeAi: false, requestId: initialRequestId })
+        .then((base) => {
+          if (cancelled) {
+            return;
+          }
+          setAnalysis(base);
+          setAnalysisIncludesAi(false);
+          // shouldLoadAi 为真时，下一次 effect 重跑会进入下面的 AI 补充分支。
+        })
+        .catch((error) => {
+          if (cancelled) {
+            return;
+          }
+          setAnalysis(null);
+          setAnalysisIncludesAi(false);
+          setAnalysisError(error instanceof Error ? error.message : "单股分析生成失败");
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setAnalysisLoading(false);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    // 已经有该股票的基础分析，仅缺 AI：后台增量加载，保留现有图表可见。
+    setAiLoading(true);
+    getStockAnalysis(selected.code, { includeAi: true, requestId: initialRequestId })
+      .then((full) => {
         if (cancelled) {
           return;
         }
-        setAnalysis(result);
-        setAnalysisIncludesAi(shouldLoadAi);
+        setAnalysis(full);
+        setAnalysisIncludesAi(true);
       })
       .catch((error) => {
         if (cancelled) {
           return;
         }
-        setAnalysis(null);
-        setAnalysisIncludesAi(false);
-        setAnalysisError(error instanceof Error ? error.message : "单股分析生成失败");
+        // AI 补充失败时保留已显示的基础分析，仅提示 AI 部分出错。
+        setAnalysisError(error instanceof Error ? error.message : "AI 分析生成失败");
       })
       .finally(() => {
         if (!cancelled) {
-          setAnalysisLoading(false);
+          setAiLoading(false);
         }
       });
 
@@ -285,34 +320,53 @@ export function StocksPageClient({
 
       {analysis ? (
         <>
+          <section className="stocks-focus-bar" aria-label="当前股票快捷概览">
+            <div className="stocks-focus-main">
+              <span className="stocks-focus-market">{analysis.market || selected.market}</span>
+              <strong>{analysis.stock_name} ({analysis.stock_code})</strong>
+              <span className="muted">信号 {analysis.signal_summary.overall_signal} · 评分 {analysis.signal_summary.overall_score}/5</span>
+            </div>
+            <div className="stocks-focus-metrics">
+              <span>
+                现价 <strong>{analysis.quote.current_price.toFixed(2)}</strong>
+              </span>
+              <span className={analysis.quote.change_pct >= 0 ? "signal-up" : "signal-down"}>
+                {analysis.quote.change_pct.toFixed(2)}%
+              </span>
+            </div>
+            <div className="stocks-focus-actions">
+              <Link href={`/stocks?query=${encodeURIComponent(selected.code)}&panel=chart#chart`} prefetch={false}>K线</Link>
+              <StockPanelLink stockCode={selected.code} panel="ai">AI</StockPanelLink>
+              <StockPanelLink stockCode={selected.code} panel="news">新闻</StockPanelLink>
+              <Link href={`/portfolio?stock_code=${encodeURIComponent(analysis.stock_code)}&stock_name=${encodeURIComponent(analysis.stock_name)}&cost_price=${encodeURIComponent(String(analysis.quote.current_price))}&status=planned&return_to=${encodeURIComponent(`/stocks?query=${analysis.stock_code}`)}&return_label=${encodeURIComponent("单股分析")}`} className="button ghost">
+                加计划
+              </Link>
+            </div>
+          </section>
+
           <section className={`panel section ${activePanel === "overview" ? "focus-panel" : ""}`} id="overview">
+            <div className="news-section-head">
+              <div>
+                <div className="section-kicker">Technical Context</div>
+                <h2>技术环境</h2>
+              </div>
+              <span className="muted">减少重复价格信息，优先看关键指标。</span>
+            </div>
             <div className="metric-grid">
-              <div className="card">
-                <div className="muted">最新价</div>
-                <strong>{analysis.quote.current_price.toFixed(2)}</strong>
-              </div>
-              <div className="card">
-                <div className="muted">涨跌幅</div>
-                <strong className={analysis.quote.change_pct >= 0 ? "signal-up" : "signal-down"}>
-                  {analysis.quote.change_pct.toFixed(2)}%
-                </strong>
-              </div>
-              <div className="card">
-                <div className="muted">综合信号</div>
-                <strong>{analysis.signal_summary.overall_signal}</strong>
-              </div>
-              <div className="card">
-                <div className="muted">评分</div>
-                <strong>{analysis.signal_summary.overall_score}/5</strong>
-              </div>
+              {buildOverviewIndicators(analysis.technical_indicators).map(([key, value]) => (
+                <div className="card" key={key}>
+                  <div className="muted">{formatIndicatorLabel(key)}</div>
+                  <strong>{value === null ? "-" : value.toFixed(2)}</strong>
+                </div>
+              ))}
             </div>
           </section>
 
           <section className="content-grid">
-            <div className="panel section" id="chart">
-              <h2>K 线缩略</h2>
-              <CandlestickChart data={analysis.chart_series} height={280} symbol={`${analysis.stock_name} ${analysis.stock_code}`} />
-              <p className="muted">使用轻量级蜡烛图组件展示最近行情，支持自适应宽度。</p>
+            <div className={`panel section ${activePanel === "chart" ? "focus-panel" : ""}`} id="chart">
+              <h2>K 线图</h2>
+              <CandlestickChart data={analysis.chart_series} height={activePanel === "chart" ? 420 : 280} symbol={`${analysis.stock_name} ${analysis.stock_code}`} />
+              <p className="muted">展示最近行情的日 K 线，支持自适应宽度；配合上方价格与涨跌幅做节奏判断。</p>
               <div style={{ marginTop: 18 }}>
                 <h3 style={{ marginBottom: 12 }}>技术分析建议</h3>
                 <div className="news-grid stocks-tech-grid">
@@ -345,6 +399,8 @@ export function StocksPageClient({
                   title="AI 分析已锁定"
                   description="解锁后可以查看更长的 AI 观点、结论和操作建议。"
                 />
+              ) : shouldLoadAi && aiLoading && !analysisIncludesAi ? (
+                <p className="muted">AI 正在生成分析报告，行情与指标已就绪，请稍候…</p>
               ) : shouldLoadAi && analysis.ai_insight.enabled ? (
                 <AICarousel
                   content={analysis.ai_insight.content || analysis.ai_insight.error || ""}
@@ -396,24 +452,40 @@ export function StocksPageClient({
 }
 
 function buildDirectCodeFallback(query: string): StockSearchResult[] {
-  if (!/^[a-z]{2}\d{6}$/i.test(query)) {
-    return [];
+  const trimmed = query.trim();
+  // A股 sh/sz 数字代码
+  if (/^[a-z]{2}\d{6}$/i.test(trimmed)) {
+    const code = trimmed.toLowerCase();
+    return [
+      {
+        name: `代码 ${code}`,
+        code,
+        market: code.startsWith("sh") ? "A股-上海" : "A股-深圳",
+        category: "",
+        score: 50,
+        match_type: "direct_code",
+      },
+    ];
   }
-  const code = query.toLowerCase();
-  return [
-    {
-      name: `代码 ${code}`,
-      code,
-      market: code.startsWith("sh") ? "A股-上海" : "A股-深圳",
-      category: "",
-      score: 50,
-      match_type: "direct_code",
-    },
-  ];
+  // 美股 ticker（纯字母，可带类别后缀，如 AAPL、BRK.B）
+  if (/^[a-z]{1,5}(\.[a-z]{1,2})?$/i.test(trimmed)) {
+    const code = `US.${trimmed.toUpperCase()}`;
+    return [
+      {
+        name: `代码 ${code}`,
+        code,
+        market: "美股",
+        category: "",
+        score: 50,
+        match_type: "direct_code",
+      },
+    ];
+  }
+  return [];
 }
 
 function normalizePanel(value?: string | null) {
-  if (value === "ai" || value === "news") {
+  if (value === "ai" || value === "news" || value === "chart") {
     return value;
   }
   return "overview";
@@ -431,4 +503,24 @@ function formatSentiment(value: NewsItem["sentiment"]) {
   if (value === "bullish") return "偏利多";
   if (value === "bearish") return "偏利空";
   return "中性";
+}
+
+function buildOverviewIndicators(indicators: StockAnalysisResponse["technical_indicators"]) {
+  const preferredKeys = ["MA5", "MA20", "MA60", "RSI", "MACD"];
+  const preferred = preferredKeys
+    .filter((key) => Object.prototype.hasOwnProperty.call(indicators, key))
+    .map((key) => [key, indicators[key]] as [string, number | null]);
+  const fallback = Object.entries(indicators).filter(([key]) => !preferredKeys.includes(key));
+  return [...preferred, ...fallback].slice(0, 4);
+}
+
+function formatIndicatorLabel(key: string) {
+  const labels: Record<string, string> = {
+    MA5: "MA5",
+    MA20: "MA20",
+    MA60: "MA60",
+    RSI: "RSI",
+    MACD: "MACD",
+  };
+  return labels[key] ?? key;
 }

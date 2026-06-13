@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 import { getPortfolioAnalysis } from "@/lib/api";
 import type { PortfolioAnalysisResponse } from "@/lib/types";
@@ -16,6 +17,9 @@ const PORTFOLIO_COPY = {
     returnRate: "收益率",
     technicalRisk: "技术风险",
     unavailable: "后端不可达时，这里会显示组合快照。",
+    nextAction: "下一步",
+    openPortfolio: "打开持仓页",
+    calm: "组合暂无明确调仓提示。",
   },
   en: {
     title: "Portfolio Snapshot",
@@ -25,6 +29,9 @@ const PORTFOLIO_COPY = {
     returnRate: "Return",
     technicalRisk: "Technical Risk",
     unavailable: "Portfolio metrics will appear here after the backend is available.",
+    nextAction: "Next action",
+    openPortfolio: "Open portfolio",
+    calm: "No urgent portfolio action right now.",
   },
 } as const;
 
@@ -64,24 +71,35 @@ export function PortfolioSnapshotPanel({ locale = "zh" }: { locale?: PortfolioSn
       {loading ? (
         <p className="muted">{copy.loading}</p>
       ) : portfolio ? (
-        <div className="metric-grid">
-          <div className="card">
-            <div className="muted">{copy.totalMarketValue}</div>
-            <strong>{portfolio.total_market_value.toFixed(2)}</strong>
+        <div className="stack">
+          <div className="portfolio-snapshot-action">
+            <div>
+              <span>{copy.nextAction}</span>
+              <strong>{portfolio.rebalance_suggestions[0] ?? copy.calm}</strong>
+            </div>
+            <Link href="/portfolio" className="button ghost">
+              {copy.openPortfolio}
+            </Link>
           </div>
-          <div className="card">
-            <div className="muted">{copy.totalPnl}</div>
-            <strong className={portfolio.total_pnl >= 0 ? "signal-up" : "signal-down"}>
-              {portfolio.total_pnl.toFixed(2)}
-            </strong>
-          </div>
-          <div className="card">
-            <div className="muted">{copy.returnRate}</div>
-            <strong>{portfolio.total_pnl_pct.toFixed(2)}%</strong>
-          </div>
-          <div className="card">
-            <div className="muted">{copy.technicalRisk}</div>
-            <strong>{portfolio.technical_risk}</strong>
+          <div className="metric-grid">
+            <div className="card">
+              <div className="muted">{copy.totalMarketValue}</div>
+              <strong>{portfolio.total_market_value.toFixed(2)}</strong>
+            </div>
+            <div className="card">
+              <div className="muted">{copy.totalPnl}</div>
+              <strong className={portfolio.total_pnl >= 0 ? "signal-up" : "signal-down"}>
+                {portfolio.total_pnl.toFixed(2)}
+              </strong>
+            </div>
+            <div className="card">
+              <div className="muted">{copy.returnRate}</div>
+              <strong>{portfolio.total_pnl_pct.toFixed(2)}%</strong>
+            </div>
+            <div className="card">
+              <div className="muted">{copy.technicalRisk}</div>
+              <strong>{portfolio.technical_risk}</strong>
+            </div>
           </div>
         </div>
       ) : (

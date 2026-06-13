@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import copy
+import json
 import sqlite3
 import time
 import re
@@ -24,6 +25,7 @@ from api.schemas import (
     AgentResponse,
     AgentHistoryTurn,
     GlobalNewsItem,
+    HotspotHeatBreakdown,
     HotspotDetailResponse,
     HotspotHistoryPoint,
     HotspotItem,
@@ -549,17 +551,32 @@ class StockAnalysisService:
         basic_data = bundle.analysis.get("基础数据", {})
         latest = bundle.dataframe.iloc[-1]
         # K 线图默认展示最近约 5 年日 K（~250 交易日 * 5），方便观察中长期趋势
-        chart_df = bundle.dataframe.tail(1250).copy().reset_index()
+        # 按列向量化提取，避免对上千行使用 DataFrame.iterrows（每行构造 Series，开销大）。
+        chart_df = bundle.dataframe.tail(1250)
+        chart_dates = [str(idx)[:10] for idx in chart_df.index]
+
+        def _column_values(name: str) -> list:
+            if name not in chart_df.columns:
+                return [None] * len(chart_df)
+            return [_safe_float(value) for value in chart_df[name].to_numpy()]
+
         chart_series = [
             {
-                "date": str(row[chart_df.columns[0]])[:10],
-                "open": _safe_float(row.get("open")),
-                "high": _safe_float(row.get("high")),
-                "low": _safe_float(row.get("low")),
-                "close": _safe_float(row.get("close")),
-                "volume": _safe_float(row.get("volume")),
+                "date": date,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
             }
-            for _, row in chart_df.iterrows()
+            for date, open_, high, low, close, volume in zip(
+                chart_dates,
+                _column_values("open"),
+                _column_values("high"),
+                _column_values("low"),
+                _column_values("close"),
+                _column_values("volume"),
+            )
         ]
         indicators = {
             key: _safe_float(latest.get(key))
@@ -616,7 +633,7 @@ class StockAnalysisService:
             chart_series=chart_series,
             metadata={
                 "data_points": len(bundle.dataframe),
-                "source": "akshare",
+                "source": "yfinance/finnhub" if infer_market(quote.stock_code) == "us" else "akshare",
                 "generated_at": quote.timestamp.isoformat(),
             },
         )
@@ -716,7 +733,7 @@ class NewsService:
 
         if not records:
             try:
-                records.extend(self._global_news_from_alerts())
+                records.extend(self._global_news_from_alerts(min_impact=2))
             except Exception:
                 pass
 
@@ -737,7 +754,7 @@ class NewsService:
                 result.append(GlobalNewsItem(**item))
             except Exception:
                 pass  # skip invalid item
-        self._response_cache.set(cache_key, result, 90)
+        self._response_cache.set(cache_key, result, 90 if result else 15)
         return result
 
     def get_context_news_for_query(self, query: str, limit: int = 6) -> List[GlobalNewsItem]:
@@ -845,13 +862,14 @@ class NewsService:
             )
         return normalized
 
-    def _global_news_from_alerts(self) -> List[Dict[str, Any]]:
+    def _global_news_from_alerts(self, min_impact: int = 3) -> List[Dict[str, Any]]:
         items: List[Dict[str, Any]] = []
         for alert in self.state_store.get_recent_alerts(limit=120):
             title = alert.get("title", "")
             summary = alert.get("summary", "")
             topic_meta = self._classify_global_topic(title, summary, alert.get("source") or "monitor")
-            if topic_meta["impact_level"] < 3:
+            impact_level = max(int(topic_meta["impact_level"]), int(alert.get("priority", 1)))
+            if impact_level < min_impact:
                 continue
             items.append(
                 {
@@ -864,7 +882,7 @@ class NewsService:
                     "topic": topic_meta["topic"],
                     "region": topic_meta["region"],
                     "sentiment": _sentiment_from_summary(summary),
-                    "impact_level": topic_meta["impact_level"],
+                    "impact_level": min(impact_level, 5),
                     "url": alert.get("raw_payload", {}).get("url"),
                     "related_symbols": topic_meta["related_symbols"],
                     "raw_payload": alert.get("raw_payload", {}),
@@ -1239,6 +1257,15 @@ class HotspotService:
         topic_counter: Counter[str] = Counter()
         topic_stocks: Dict[str, List[HotspotRelatedStock]] = defaultdict(list)
         topic_reasons: Dict[str, List[str]] = defaultdict(list)
+        topic_breakdowns: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: {
+                "trading_activity": 0.0,
+                "discussion_heat": 0.0,
+                "news_heat": 0.0,
+                "alert_count": 0.0,
+                "rank_hits": 0.0,
+            }
+        )
 
         for alert in alerts:
             title = alert.get("title", "")
@@ -1246,10 +1273,19 @@ class HotspotService:
             stock_name = alert.get("stock_name", "")
             stock_code = alert.get("stock_code", "")
             priority = max(1, int(alert.get("priority", 1)))
+            event_type = str(alert.get("event_type") or "")
             for sector_name, sector in sectors.items():
                 if not self._sector_keywords_match(sector["keywords"], title, summary, stock_name, stock_code):
                     continue
-                topic_counter[sector_name] += priority
+                breakdown = topic_breakdowns[sector_name]
+                breakdown["alert_count"] += 1
+                if event_type == "fund_flow" or any(token in title + summary for token in ["资金流", "净流入", "净流出", "放量", "成交"]):
+                    breakdown["trading_activity"] += priority * 1.8
+                    breakdown["discussion_heat"] += priority * 0.35
+                else:
+                    breakdown["discussion_heat"] += priority
+                    breakdown["news_heat"] += priority * 0.7
+                topic_counter[sector_name] = self._hotspot_total_score(breakdown)
                 topic_reasons[sector_name].append(title or summary)
                 topic_stocks[sector_name].append(
                     HotspotRelatedStock(
@@ -1269,7 +1305,11 @@ class HotspotService:
                     " ".join(global_news.related_symbols),
                 ):
                     continue
-                topic_counter[sector_name] += max(2, global_news.impact_level)
+                impact = max(2, global_news.impact_level)
+                breakdown = topic_breakdowns[sector_name]
+                breakdown["discussion_heat"] += impact
+                breakdown["news_heat"] += impact * 1.2
+                topic_counter[sector_name] = self._hotspot_total_score(breakdown)
                 topic_reasons[sector_name].append(global_news.title)
                 topic_stocks[sector_name].extend(sector["stocks"][:2])
 
@@ -1281,7 +1321,13 @@ class HotspotService:
                 for sector_name, sector in sectors.items():
                     if not self._sector_keywords_match(sector["keywords"], rank_name, rank_code):
                         continue
-                    topic_counter[sector_name] += 1
+                    rank_value = _safe_float(rank.get("rank")) or 50
+                    trading_boost = max(1.0, 6.0 - min(rank_value, 50.0) / 10.0)
+                    breakdown = topic_breakdowns[sector_name]
+                    breakdown["trading_activity"] += trading_boost
+                    breakdown["discussion_heat"] += 1
+                    breakdown["rank_hits"] += 1
+                    topic_counter[sector_name] = self._hotspot_total_score(breakdown)
                     topic_reasons[sector_name].append(f"热度排名 {rank.get('rank', '未知')}")
                     topic_stocks[sector_name].append(
                         HotspotRelatedStock(
@@ -1302,20 +1348,87 @@ class HotspotService:
             if not related_stocks or score <= 0:
                 continue
             top_reason = next((item for item in topic_reasons[topic_name] if item), f"{topic_name} 相关消息密度提升")
+            breakdown = topic_breakdowns[topic_name]
+            heat_breakdown = self._build_hotspot_breakdown(breakdown, topic_reasons[topic_name])
             items.append(
                 HotspotItem(
                     topic_name=topic_name,
                     heat_score=float(score),
-                    reason=f"{top_reason[:40]}，累计热度 {int(score)}",
+                    reason=(
+                        f"{top_reason[:40]}，综合热度 {int(score)}"
+                        f"（交易 {breakdown['trading_activity']:.1f} / 讨论 {breakdown['discussion_heat']:.1f}）"
+                    ),
                     related_stocks=related_stocks,
-                    trend_direction="up" if score >= 4 else "flat",
-                    ai_summary=f"{topic_name} 近期被多条消息和异动共同触发，可优先跟踪相关代表股。",
+                    trend_direction="up" if score >= 8 else "flat",
+                    ai_summary=self._build_hotspot_summary(topic_name, heat_breakdown),
                     source="sector_config+monitor+news+hk_rank",
+                    heat_breakdown=heat_breakdown,
                 )
             )
         _HOTSPOTS_CACHE = items
         _HOTSPOTS_CACHE_TIME = time.monotonic()
         return items[: min(limit, len(items))]
+
+    @staticmethod
+    def _hotspot_total_score(breakdown: Dict[str, float]) -> float:
+        return round(
+            breakdown["trading_activity"] * 1.2
+            + breakdown["discussion_heat"]
+            + breakdown["news_heat"] * 0.8
+            + breakdown["rank_hits"] * 1.5,
+            1,
+        )
+
+    @staticmethod
+    def _build_hotspot_breakdown(
+        breakdown: Dict[str, float],
+        reasons: List[str],
+    ) -> HotspotHeatBreakdown:
+        reason_text = " ".join(reasons)
+        risk_tokens = ["减持", "净流出", "下跌", "监管", "处罚", "风险", "亏损", "警惕", "退市", "利空"]
+        has_risk_signal = any(token in reason_text for token in risk_tokens)
+        trading_activity = round(breakdown["trading_activity"], 1)
+        discussion_heat = round(breakdown["discussion_heat"], 1)
+        news_heat = round(breakdown["news_heat"], 1)
+        if has_risk_signal and (trading_activity >= 3 or discussion_heat >= 4):
+            attention_level = "caution"
+        elif trading_activity >= 4 and discussion_heat >= 4:
+            attention_level = "focus"
+        else:
+            attention_level = "watch"
+
+        basis: List[str] = []
+        if trading_activity:
+            basis.append("资金流/热榜/成交异动贡献交易活跃度")
+        if discussion_heat:
+            basis.append("新闻命中、主题词和热榜共同贡献讨论度")
+        if news_heat:
+            basis.append("高影响消息贡献催化强度")
+        if has_risk_signal:
+            basis.append("存在净流出、减持、监管或业绩风险词，需提高警惕")
+
+        return HotspotHeatBreakdown(
+            trading_activity=trading_activity,
+            discussion_heat=discussion_heat,
+            news_heat=news_heat,
+            alert_count=int(breakdown["alert_count"]),
+            rank_hits=int(breakdown["rank_hits"]),
+            attention_level=attention_level,
+            basis=basis[:4],
+        )
+
+    @staticmethod
+    def _build_hotspot_summary(topic_name: str, breakdown: HotspotHeatBreakdown) -> str:
+        level_text = {
+            "focus": "交易活跃和讨论度同时靠前，属于当前优先跟踪方向",
+            "caution": "热度较高但伴随风险信号，适合先警惕再确认",
+            "watch": "有消息或讨论触发，暂以观察和验证持续性为主",
+        }[breakdown.attention_level]
+        return (
+            f"{topic_name}：{level_text}。"
+            f"交易活跃 {breakdown.trading_activity:.1f}，讨论热度 {breakdown.discussion_heat:.1f}，"
+            f"消息催化 {breakdown.news_heat:.1f}。"
+        )
 
     def get_hotspot_detail(self, topic_name: str) -> HotspotDetailResponse:
         cache_key = f"hotspot_detail:{topic_name}"
@@ -1702,6 +1815,15 @@ class StrategyHoldingStore:
                 connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_take_profit REAL")
             if "plan_max_position_pct" not in columns:
                 connection.execute("ALTER TABLE strategy_holdings ADD COLUMN plan_max_position_pct REAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_analysis_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def list_holdings(self) -> List[StrategyHolding]:
         with self._connect() as connection:
@@ -1860,6 +1982,32 @@ class StrategyHoldingStore:
             if cursor.rowcount == 0:
                 raise NotFoundError(f"Strategy holding {holding_id} not found")
 
+    def get_analysis_cache(self, cache_key: str) -> Optional[str]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM strategy_analysis_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+        return str(row["payload"]) if row else None
+
+    def set_analysis_cache(self, cache_key: str, payload: str) -> None:
+        now = _now_utc().isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO strategy_analysis_cache (cache_key, payload, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
+                """,
+                (cache_key, payload, now),
+            )
+
+    def clear_analysis_cache(self, cache_key: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM strategy_analysis_cache WHERE cache_key = ?", (cache_key,))
+
     def _normalize_exit_fields(self, holding: StrategyHolding, now: str) -> Tuple[Optional[float], Optional[str]]:
         if holding.status != "exited":
             return None, None
@@ -1977,6 +2125,8 @@ class StrategyService:
         self.market_service = market_service or MarketService(stock_service)
         self.store = store or StrategyHoldingStore()
         self.portfolio_store = portfolio_store or PortfolioStore()
+        self.analysis_cache_key = "strategy_holdings"
+        self._analysis_cache_lock = Lock()
 
     def screen_can_slim(
         self,
@@ -2055,6 +2205,7 @@ class StrategyService:
     def create_holding(self, holding: StrategyHolding) -> StrategyHolding:
         created = self.store.create_holding(holding)
         self._sync_portfolio_position_for_code(created.stock_code)
+        self._clear_holdings_analysis_cache()
         return created
 
     def update_holding(self, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
@@ -2065,6 +2216,7 @@ class StrategyService:
             codes_to_sync.add(previous.stock_code)
         for code in codes_to_sync:
             self._sync_portfolio_position_for_code(code)
+        self._clear_holdings_analysis_cache()
         return updated
 
     def delete_holding(self, holding_id: int) -> None:
@@ -2072,29 +2224,33 @@ class StrategyService:
         self.store.delete_holding(holding_id)
         if previous:
             self._sync_portfolio_position_for_code(previous.stock_code)
+        self._clear_holdings_analysis_cache()
 
     def analyze_holdings(self) -> StrategyHoldingAnalysisResponse:
         holdings = self.store.list_holdings()
         if not holdings:
-            return StrategyHoldingAnalysisResponse(
-                total_cost=0,
-                total_market_value=0,
-                total_pnl=0,
-                total_pnl_pct=0,
-                total_realized_pnl=0,
-                holding_count=0,
-                active_count=0,
-                watching_count=0,
-                planned_count=0,
-                weakening_count=0,
-                exited_count=0,
-                invalidated_count=0,
-                win_rate_pct=0,
-                average_score=0,
-                todo_items=[],
-                review_items=[],
-                holdings=[],
-            )
+            return self._empty_holdings_analysis()
+
+        cached = self._read_cached_holdings_analysis(holdings)
+        if cached:
+            return cached
+        return self._build_snapshot_holdings_analysis(holdings)
+
+    def refresh_holdings(self) -> StrategyHoldingAnalysisResponse:
+        holdings = self.store.list_holdings()
+        previous = self._read_cached_holdings_analysis(holdings) if holdings else None
+        analysis = self._compute_holdings_analysis()
+        if previous:
+            analysis = self._merge_refresh_analysis_with_previous(analysis, previous)
+        self._write_cached_holdings_analysis(analysis)
+        return analysis
+
+    def _compute_holdings_analysis(self) -> StrategyHoldingAnalysisResponse:
+        holdings = self.store.list_holdings()
+        if not holdings:
+            analysis = self._empty_holdings_analysis()
+            self._write_cached_holdings_analysis(analysis)
+            return analysis
 
         try:
             market_regime = self.market_service.get_market_regime()
@@ -2111,11 +2267,31 @@ class StrategyService:
             )
 
         analyses: List[StrategyHoldingAnalysis] = []
-        for holding in holdings:
-            try:
-                analyses.append(self._analyze_single_holding(holding, market_regime))
-            except Exception as exc:
-                analyses.append(self._build_unavailable_holding_analysis(holding, market_regime, exc))
+        max_workers = min(4, len(holdings))
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            future_by_holding = [
+                (holding, executor.submit(self._analyze_single_holding, holding, market_regime))
+                for holding in holdings
+            ]
+            done, _ = wait([future for _, future in future_by_holding], timeout=18)
+            for holding, future in future_by_holding:
+                if future not in done:
+                    future.cancel()
+                    analyses.append(
+                        self._build_unavailable_holding_analysis(
+                            holding,
+                            market_regime,
+                            TimeoutError("单股策略分析超过 18 秒，已降级为持仓快照"),
+                        )
+                    )
+                    continue
+                try:
+                    analyses.append(future.result())
+                except Exception as exc:
+                    analyses.append(self._build_unavailable_holding_analysis(holding, market_regime, exc))
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         total_cost = 0.0
         total_market_value = 0.0
         total_realized_pnl = 0.0
@@ -2126,6 +2302,7 @@ class StrategyService:
         exited_count = 0
         invalidated_count = 0
         exited_win_count = 0
+        scored_count = 0
         total_score = 0.0
         for item in analyses:
             cost = item.holding.entry_price * item.holding.quantity
@@ -2133,7 +2310,9 @@ class StrategyService:
                 total_cost += cost
                 total_market_value += item.market_value
                 total_realized_pnl += item.realized_pnl
-            total_score += item.strategy_score.total
+            if self._has_reusable_holding_analysis(item):
+                total_score += item.strategy_score.total
+                scored_count += 1
             if item.holding.status == "holding":
                 active_count += 1
             elif item.holding.status == "watching":
@@ -2153,7 +2332,7 @@ class StrategyService:
         total_pnl = total_market_value - total_cost
         total_pnl_pct = (total_pnl / total_cost * 100) if total_cost else 0
         win_rate_pct = (exited_win_count / exited_count * 100) if exited_count else 0
-        average_score = (total_score / len(holdings)) if holdings else 0
+        average_score = (total_score / scored_count) if scored_count else 0
         todo_items = self._build_todo_items(analyses)
         review_items = self._build_review_items(analyses)
         return StrategyHoldingAnalysisResponse(
@@ -2176,8 +2355,236 @@ class StrategyService:
             holdings=analyses,
         )
 
-    def refresh_holdings(self) -> StrategyHoldingAnalysisResponse:
-        return self.analyze_holdings()
+    @staticmethod
+    def _empty_holdings_analysis() -> StrategyHoldingAnalysisResponse:
+        return StrategyHoldingAnalysisResponse(
+            total_cost=0,
+            total_market_value=0,
+            total_pnl=0,
+            total_pnl_pct=0,
+            total_realized_pnl=0,
+            holding_count=0,
+            active_count=0,
+            watching_count=0,
+            planned_count=0,
+            weakening_count=0,
+            exited_count=0,
+            invalidated_count=0,
+            win_rate_pct=0,
+            average_score=0,
+            todo_items=[],
+            review_items=[],
+            holdings=[],
+        )
+
+    def _neutral_market_regime(self) -> MarketRegimeResponse:
+        return MarketRegimeResponse(
+            regime="neutral",
+            score=50,
+            action_bias="市场数据暂不可用，按中性环境处理。",
+            position_guidance="建议轻仓试错。",
+            summary="市场环境数据暂不可用。",
+            notes=[],
+            indices=[],
+            updated_at=_now_utc(),
+        )
+
+    def _build_snapshot_holdings_analysis(self, holdings: List[StrategyHolding]) -> StrategyHoldingAnalysisResponse:
+        market_regime = self._neutral_market_regime()
+        analyses = [
+            self._build_unavailable_holding_analysis(holding, market_regime, ValueError("尚未生成服务端评分缓存"))
+            for holding in holdings
+        ]
+        return self._summarize_holdings_analysis(analyses)
+
+    def _read_cached_holdings_analysis(
+        self,
+        holdings: List[StrategyHolding],
+    ) -> Optional[StrategyHoldingAnalysisResponse]:
+        with self._analysis_cache_lock:
+            try:
+                raw = self.store.get_analysis_cache(self.analysis_cache_key)
+                if not raw:
+                    return None
+                payload = json.loads(raw)
+                cached = StrategyHoldingAnalysisResponse.model_validate(payload.get("analysis", payload))
+            except Exception:
+                return None
+        if not cached.holdings:
+            return None
+        merged = self._merge_cached_holdings_analysis(holdings, cached)
+        if not any(self._has_reusable_holding_analysis(item) for item in merged.holdings):
+            return None
+        return merged
+
+    def _write_cached_holdings_analysis(self, analysis: StrategyHoldingAnalysisResponse) -> None:
+        if analysis.holdings and not any(self._has_reusable_holding_analysis(item) for item in analysis.holdings):
+            return
+        payload = {
+            "updated_at": _now_utc().isoformat(),
+            "analysis": analysis.model_dump(mode="json"),
+        }
+        with self._analysis_cache_lock:
+            self.store.set_analysis_cache(self.analysis_cache_key, json.dumps(payload, ensure_ascii=False))
+
+    def _clear_holdings_analysis_cache(self) -> None:
+        with self._analysis_cache_lock:
+            self.store.clear_analysis_cache(self.analysis_cache_key)
+
+    def _merge_refresh_analysis_with_previous(
+        self,
+        latest: StrategyHoldingAnalysisResponse,
+        previous: StrategyHoldingAnalysisResponse,
+    ) -> StrategyHoldingAnalysisResponse:
+        previous_by_id = {
+            item.holding.id: item
+            for item in previous.holdings
+            if item.holding.id is not None and self._has_reusable_holding_analysis(item)
+        }
+        previous_by_code = {
+            normalize_stock_code(item.holding.stock_code): item
+            for item in previous.holdings
+            if self._has_reusable_holding_analysis(item)
+        }
+        merged: List[StrategyHoldingAnalysis] = []
+        for item in latest.holdings:
+            if self._has_reusable_holding_analysis(item):
+                merged.append(item)
+                continue
+            previous_item = previous_by_id.get(item.holding.id)
+            if previous_item is None:
+                previous_item = previous_by_code.get(normalize_stock_code(item.holding.stock_code))
+            merged.append(self._rebase_cached_holding_analysis(item.holding, previous_item) if previous_item else item)
+        return self._summarize_holdings_analysis(merged)
+
+    def _merge_cached_holdings_analysis(
+        self,
+        holdings: List[StrategyHolding],
+        cached: StrategyHoldingAnalysisResponse,
+    ) -> StrategyHoldingAnalysisResponse:
+        cached_by_id = {
+            item.holding.id: item
+            for item in cached.holdings
+            if item.holding.id is not None and self._has_reusable_holding_analysis(item)
+        }
+        cached_by_code = {
+            normalize_stock_code(item.holding.stock_code): item
+            for item in cached.holdings
+            if self._has_reusable_holding_analysis(item)
+        }
+        market_regime = self._neutral_market_regime()
+        analyses: List[StrategyHoldingAnalysis] = []
+        for holding in holdings:
+            cached_item = cached_by_id.get(holding.id)
+            if cached_item is None:
+                cached_item = cached_by_code.get(normalize_stock_code(holding.stock_code))
+            if cached_item is not None:
+                analyses.append(self._rebase_cached_holding_analysis(holding, cached_item))
+            else:
+                analyses.append(
+                    self._build_unavailable_holding_analysis(
+                        holding,
+                        market_regime,
+                        ValueError("该持仓暂无服务端评分缓存"),
+                    )
+                )
+        return self._summarize_holdings_analysis(analyses)
+
+    @staticmethod
+    def _rebase_cached_holding_analysis(
+        holding: StrategyHolding,
+        cached: StrategyHoldingAnalysis,
+    ) -> StrategyHoldingAnalysis:
+        current_price = holding.exit_price if holding.status == "exited" and holding.exit_price is not None else cached.current_price
+        is_pre_position = holding.status in {"watching", "planned"}
+        cost = holding.entry_price * holding.quantity
+        market_value = 0.0 if is_pre_position else current_price * holding.quantity
+        pnl = 0.0 if is_pre_position else market_value - cost
+        realized_pnl = (
+            ((holding.exit_price or 0) - holding.entry_price) * holding.quantity
+            if holding.status == "exited" and holding.exit_price is not None
+            else 0.0
+        )
+        return cached.model_copy(
+            update={
+                "holding": holding,
+                "current_price": current_price,
+                "market_value": market_value,
+                "pnl": pnl,
+                "pnl_pct": 0.0 if is_pre_position else ((pnl / cost * 100) if cost else 0.0),
+                "realized_pnl": realized_pnl,
+                "realized_pnl_pct": (realized_pnl / cost * 100) if cost and realized_pnl else 0.0,
+                "analysis_status": "cached",
+            }
+        )
+
+    @staticmethod
+    def _has_reusable_holding_analysis(item: StrategyHoldingAnalysis) -> bool:
+        return item.strategy_score.total > 0 and item.analysis_status in {"live", "cached"}
+
+    def _summarize_holdings_analysis(
+        self,
+        analyses: List[StrategyHoldingAnalysis],
+    ) -> StrategyHoldingAnalysisResponse:
+        total_cost = 0.0
+        total_market_value = 0.0
+        total_realized_pnl = 0.0
+        active_count = 0
+        watching_count = 0
+        planned_count = 0
+        weakening_count = 0
+        exited_count = 0
+        invalidated_count = 0
+        exited_win_count = 0
+        scored_count = 0
+        total_score = 0.0
+        for item in analyses:
+            cost = item.holding.entry_price * item.holding.quantity
+            if item.holding.status not in {"watching", "planned"}:
+                total_cost += cost
+                total_market_value += item.market_value
+                total_realized_pnl += item.realized_pnl
+            if self._has_reusable_holding_analysis(item):
+                total_score += item.strategy_score.total
+                scored_count += 1
+            if item.holding.status == "holding":
+                active_count += 1
+            elif item.holding.status == "watching":
+                watching_count += 1
+            elif item.holding.status == "planned":
+                planned_count += 1
+            elif item.holding.status == "weakening":
+                active_count += 1
+                weakening_count += 1
+            elif item.holding.status == "exited":
+                exited_count += 1
+                if item.realized_pnl > 0:
+                    exited_win_count += 1
+            elif item.holding.status == "invalidated":
+                invalidated_count += 1
+
+        total_pnl = total_market_value - total_cost
+        total_pnl_pct = (total_pnl / total_cost * 100) if total_cost else 0
+        win_rate_pct = (exited_win_count / exited_count * 100) if exited_count else 0
+        return StrategyHoldingAnalysisResponse(
+            total_cost=total_cost,
+            total_market_value=total_market_value,
+            total_pnl=total_pnl,
+            total_pnl_pct=total_pnl_pct,
+            total_realized_pnl=total_realized_pnl,
+            holding_count=len(analyses),
+            active_count=active_count,
+            watching_count=watching_count,
+            planned_count=planned_count,
+            weakening_count=weakening_count,
+            exited_count=exited_count,
+            invalidated_count=invalidated_count,
+            win_rate_pct=round(win_rate_pct, 2),
+            average_score=round((total_score / scored_count) if scored_count else 0, 2),
+            todo_items=self._build_todo_items(analyses),
+            review_items=self._build_review_items(analyses),
+            holdings=analyses,
+        )
 
     def _analyze_single_holding(
         self,
@@ -2239,6 +2646,7 @@ class StrategyService:
             action_reason=action_reason,
             trigger_hits=trigger_hits,
             alerts=alerts[:3],
+            analysis_status="live",
         )
 
     def _build_unavailable_holding_analysis(
@@ -2268,6 +2676,15 @@ class StrategyService:
         trigger_hits = self._detect_trade_plan_hits(holding, fallback_price, market_regime)
         thesis_status = "broken" if holding.status == "invalidated" else "weakening" if holding.status == "weakening" else "active"
         action_label, action_reason = self._build_unavailable_holding_action(holding)
+        fallback_candidate = self._score_candidate_quick(
+            {"code": holding.stock_code, "name": holding.stock_name},
+            "market",
+            holding.source_topic,
+        )
+        factor_notes = {
+            **fallback_candidate.factor_notes,
+            "data": "实时行情或新闻源暂不可用，当前使用本地快速兜底评分；请稍后手动刷新获取完整评分。",
+        }
 
         return StrategyHoldingAnalysis(
             holding=holding,
@@ -2277,17 +2694,15 @@ class StrategyService:
             pnl_pct=pnl_pct,
             realized_pnl=realized_pnl,
             realized_pnl_pct=realized_pnl_pct,
-            strategy_score=StrategyScoreBreakdown(c=0, a=0, n=0, s=0, l=0, i=0, m=0, total=0),
+            strategy_score=fallback_candidate.score,
             thesis_status=thesis_status,
-            factor_notes={
-                "data": "实时行情或评分服务暂时不可用，当前先展示已保存的持仓记录。",
-                "plan": "交易计划字段和持仓状态已保留，可在数据恢复后继续刷新。",
-            },
+            factor_notes=factor_notes,
             invalidation_reason="行情数据暂不可用，当前无法完整验证交易假设。" if holding.status == "invalidated" else None,
             action_label=action_label,
             action_reason=action_reason,
             trigger_hits=trigger_hits,
             alerts=alerts[:3],
+            analysis_status="degraded",
         )
 
     @staticmethod
@@ -2530,7 +2945,7 @@ class StrategyService:
         market_regime: Optional[MarketRegimeResponse] = None,
     ) -> StrategyCandidate:
         analysis = self.stock_service.get_stock_analysis(candidate["code"], include_ai=False)
-        news_items = self.news_service.get_stock_news(candidate["code"], candidate["name"], limit=5)
+        news_items = self._get_stock_news_quick(candidate["code"], candidate["name"], limit=5)
         chart_series = analysis.chart_series[-120:] if analysis.chart_series else []
         closes = [float(item["close"]) for item in chart_series if item.get("close") is not None]
         volumes = [float(item["volume"]) for item in chart_series if item.get("volume") is not None]
@@ -2674,6 +3089,17 @@ class StrategyService:
                 "symbol": extract_symbol(analysis.stock_code),
             },
         )
+
+    def _get_stock_news_quick(self, stock_code: str, stock_name: str, limit: int = 5) -> List[NewsItem]:
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self.news_service.get_stock_news, stock_code, stock_name, limit)
+        try:
+            return future.result(timeout=3)
+        except Exception:
+            future.cancel()
+            return []
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _build_institutional_note(
         self,

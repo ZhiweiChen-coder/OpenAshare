@@ -7,7 +7,7 @@
     "pm2:start": "pm2 start ecosystem.config.cjs",
     "pm2:stop": "pm2 delete openashare-api openashare-web",
     "pm2:flush": "pm2 flush",
-    "lint": "next lint"
+    "lint": "eslint app components lib next.config.ts"
   },
   "engines": {
     "node": ">=20 <23"

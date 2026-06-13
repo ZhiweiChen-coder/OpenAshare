@@ -74,6 +74,18 @@ class StockSearcher:
                 },
             )
         return stock_db
+
+    def _merge_latest_stock_pool(self) -> None:
+        """Keep runtime search data in sync with the editable local stock pool."""
+        for name, code in load_stock_pool().items():
+            self.base_stock_db.setdefault(
+                name,
+                {
+                    "code": code,
+                    "market": get_market_label(code),
+                    "category": "",
+                },
+            )
     
     def search_stocks(self, query: str, max_results: int = 10) -> List[Dict]:
         """
@@ -89,12 +101,14 @@ class StockSearcher:
         query = query.strip()
         if not query:
             return []
+
+        self._merge_latest_stock_pool()
         
         # 检查缓存
         cache_key = f"{query}_{max_results}"
         if cache_key in self.search_cache:
             cache_time, cache_results = self.search_cache[cache_key]
-            if time.time() - cache_time < self.cache_expiry:
+            if cache_results and time.time() - cache_time < self.cache_expiry:
                 return cache_results
         
         results = []
@@ -146,7 +160,8 @@ class StockSearcher:
         final_results = sorted_results[:max_results]
         
         # 缓存结果
-        self.search_cache[cache_key] = (time.time(), final_results)
+        if final_results:
+            self.search_cache[cache_key] = (time.time(), final_results)
         
         return final_results
     

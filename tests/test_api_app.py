@@ -514,6 +514,44 @@ def test_strategy_holdings_endpoints(monkeypatch):
     assert refresh_response.json()["total_pnl"] == 750
 
 
+def test_degraded_strategy_scores_are_not_reusable(tmp_path):
+    service = services_module.StrategyService(
+        stock_service=SimpleNamespace(),
+        news_service=SimpleNamespace(),
+        hotspot_service=SimpleNamespace(),
+        market_service=SimpleNamespace(),
+        store=services_module.StrategyHoldingStore(db_path=str(tmp_path / "strategy.db")),
+        portfolio_store=services_module.PortfolioStore(db_path=str(tmp_path / "portfolio.db")),
+    )
+    holding = StrategyHolding(
+        id=1,
+        strategy_key="can_slim",
+        stock_code="sh688041",
+        stock_name="海光信息",
+        entry_price=120,
+        quantity=100,
+        status="holding",
+    )
+    degraded = StrategyHoldingAnalysis(
+        holding=holding,
+        current_price=120,
+        market_value=12000,
+        pnl=0,
+        pnl_pct=0,
+        strategy_score=StrategyScoreBreakdown(c=72, a=72, n=72, s=72, l=72, i=72, m=72, total=72),
+        thesis_status="active",
+        action_label="继续持有",
+        action_reason="行情暂不可用",
+        analysis_status="degraded",
+    )
+
+    summary = service._summarize_holdings_analysis([degraded])
+
+    assert service._has_reusable_holding_analysis(degraded) is False
+    assert service._has_reusable_holding_analysis(degraded.model_copy(update={"analysis_status": "live"})) is True
+    assert summary.average_score == 0
+
+
 def test_portfolio_missing_mutations_return_404(monkeypatch):
     monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
 
