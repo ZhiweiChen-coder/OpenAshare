@@ -31,6 +31,12 @@ export function CandlestickChart({ data, height = 400, symbol = "" }: Candlestic
   useEffect(() => {
     if (!containerRef.current || !data.length) return;
 
+    // 跟随全局行情方向色（受 <html data-market-color> 切换），
+    // 回退到当前国际惯例色值，保证读取失败时表现不变。
+    const rootStyle = getComputedStyle(document.documentElement);
+    const upColor = rootStyle.getPropertyValue("--color-up").trim() || "#0d9488";
+    const downColor = rootStyle.getPropertyValue("--color-down").trim() || "#c25b3a";
+
     const chart = createChart(containerRef.current, {
       layout: { background: { color: "#ffffff" }, textColor: "#0d0d0d" },
       grid: { vertLines: { color: "rgba(0,0,0,0.06)" }, horzLines: { color: "rgba(0,0,0,0.06)" } },
@@ -59,11 +65,11 @@ export function CandlestickChart({ data, height = 400, symbol = "" }: Candlestic
     });
 
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#0d9488",
-      downColor: "#c25b3a",
+      upColor,
+      downColor,
       borderVisible: false,
-      wickUpColor: "#0d9488",
-      wickDownColor: "#c25b3a",
+      wickUpColor: upColor,
+      wickDownColor: downColor,
     });
 
     const seriesData = data

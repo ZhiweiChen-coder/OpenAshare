@@ -821,10 +821,41 @@ class LLMAnalyzer:
             logger.debug(f"生成趋势强度分析失败: {str(e)}")
             return None
 
+    def _stream_chat_completion(
+        self,
+        messages: list,
+        max_tokens: int,
+        temperature: float,
+        token_callback: Callable[[str], None],
+    ) -> str:
+        """流式调用模型，逐块回调增量文本，返回完整文本。"""
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+        )
+        parts: list[str] = []
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            text = getattr(delta, "content", None) if delta else None
+            if text:
+                parts.append(text)
+                try:
+                    token_callback(text)
+                except Exception:
+                    # 回调（通常是 SSE 推送）失败不应中断生成
+                    pass
+        return "".join(parts).strip()
+
     def generate_single_stock_analysis(
         self,
         detailed_data: Dict[str, Any],
         progress_callback: Optional[Callable[[int, str], None]] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
     ) -> Optional[str]:
         """
         生成单股深度分析
@@ -1066,14 +1097,29 @@ class LLMAnalyzer:
             
             logger.debug("发送单股分析请求...")
             report(72, "模型请求已发送，正在等待 AI 返回完整报告")
-            # 根据分析深度设置不同的max_tokens
+            # 根据分析深度设置 max_tokens。注意系统提示要求 1500-3000 字，中文约
+            # 1 字 ≥ 1 token，过小的上限会把报告从中间截断（如支撑阻力/投资建议处），
+            # 因此留足余量。
             if detailed_data['analysis_depth'] == "快速分析":
-                max_tokens = 1200
+                max_tokens = 2000
             elif detailed_data['analysis_depth'] == "深度分析":
-                max_tokens = 2200
+                max_tokens = 4096
             else:  # 全面评估
-                max_tokens = 3200
+                max_tokens = 6144
             
+            if token_callback is not None:
+                # 流式：逐字推送，前端可实时渲染
+                analysis_text = self._stream_chat_completion(
+                    messages, max_tokens, 0.5, token_callback
+                )
+                if analysis_text:
+                    logger.debug(f"{detailed_data['name']} 单股分析流式生成成功")
+                    report(92, "AI 已返回内容，正在整理结果")
+                    return analysis_text
+                logger.debug("单股分析流式响应为空")
+                report(92, "AI 请求已完成，但响应内容为空")
+                return None
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -1081,7 +1127,7 @@ class LLMAnalyzer:
                 max_tokens=max_tokens,  # 设置足够的token数量
                 stream=False
             )
-            
+
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
                 logger.debug(f"{detailed_data['name']} 单股分析生成成功")

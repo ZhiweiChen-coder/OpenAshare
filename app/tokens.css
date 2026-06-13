@@ -1,0 +1,79 @@
+/* =====================================================================
+ * OpenAshare · Design Tokens
+ * ---------------------------------------------------------------------
+ * 两层令牌体系：
+ *   Layer 1 — 原始色板（只定义，组件不直接引用）
+ *   Layer 2 — 语义令牌（组件只消费这一层）
+ *
+ * 本文件在 globals.css 之前引入，作为整套视觉的地基。
+ * 现阶段为「增量」：只新增令牌、不覆盖 globals.css 已有的 :root 变量，
+ * 因此引入后现有视觉默认保持不变。
+ * ===================================================================== */
+
+:root {
+  /* ---- Layer 1 · 原始色板 -------------------------------------- */
+
+  /* 赤陶（品牌主色族） */
+  --clay-400: #cf6f4a;
+  --clay-500: #be5b36;
+  --clay-600: #a44a29;
+
+  /* 青绿（点缀色族） */
+  --teal-400: #14a08e;
+  --teal-500: #0f8a7b;
+  --teal-600: #0c6f63;
+
+  /* 暖砂（中性表面族） */
+  --sand-50: #fbfaf6;
+  --sand-100: #f3eee7;
+  --sand-200: #ece7df;
+  --sand-300: #e2dccf;
+
+  /* 墨（文字族） */
+  --ink-900: #131313;
+  --ink-700: #3a3631;
+  --ink-500: #6b655f;
+  --ink-300: #9a938b;
+
+  /* 行情涨跌原始色 */
+  --rise-green: #0d9488;
+  --fall-red: #cf3b3b;
+
+  --white: #ffffff;
+
+  /* ---- Layer 2 · 语义令牌 -------------------------------------- */
+
+  /* 行情方向色（语义按「涨/跌」命名，颜色随市场惯例切换）
+   * 默认：国际惯例 = 绿涨红跌（与当前线上行为一致）
+   * 在 <html data-market-color="cn"> 下切换为 A 股惯例 = 红涨绿跌 */
+  --color-up: var(--rise-green);
+  --color-down: var(--fall-red);
+  --color-flat: var(--ink-500);
+
+  /* ---- 间距刻度（4px 基准，统一垂直韵律） --------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- 字体 ---------------------------------------------------- */
+  /* 数字专用：价格、涨跌幅、成交量等表格化数字用等宽，对齐更稳 */
+  --font-numeric: "SF Mono", "JetBrains Mono", "Roboto Mono", "DejaVu Sans Mono",
+    ui-monospace, "Menlo", "Consolas", monospace;
+}
+
+/* A 股惯例：红涨绿跌 —— 切换 <html data-market-color="cn"> 即可全局生效 */
+:root[data-market-color="cn"] {
+  --color-up: var(--fall-red);
+  --color-down: var(--rise-green);
+}
+
+/* 显式国际惯例（可选标注，等价于默认值） */
+:root[data-market-color="intl"] {
+  --color-up: var(--rise-green);
+  --color-down: var(--fall-red);
+}

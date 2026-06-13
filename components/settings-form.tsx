@@ -135,7 +135,7 @@ export function SettingsForm() {
   }
 
   return (
-    <div className="stack">
+    <div className="stack settings-page">
       <section className="panel section">
         <div className="section-kicker">User Settings</div>
         <h1>用户设置</h1>

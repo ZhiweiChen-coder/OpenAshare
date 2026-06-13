@@ -9,7 +9,7 @@ import { DemoAccessGate } from "@/components/demo-access-gate";
 import { SearchForm } from "@/components/search-form";
 import { StockAnalysisProgress } from "@/components/stock-analysis-progress";
 import { StockPanelLink } from "@/components/stock-panel-link";
-import { getStockAnalysis, getStockNews, searchStocksWithOptions } from "@/lib/api";
+import { getStockAnalysis, getStockNews, searchStocksWithOptions, streamStockAnalysis } from "@/lib/api";
 import type { NewsItem, StockAnalysisResponse, StockSearchResult } from "@/lib/types";
 
 type StocksPageClientProps = {
@@ -41,9 +41,12 @@ export function StocksPageClient({
 
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
   const [analysisIncludesAi, setAnalysisIncludesAi] = useState(false);
+  // AI 流式生成：逐字累积的文本与当前处理步骤
+  const [aiStreamText, setAiStreamText] = useState("");
+  const [aiStreaming, setAiStreaming] = useState(false);
+  const [aiStreamStage, setAiStreamStage] = useState<{ message: string; pct: number } | null>(null);
 
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoading, setNewsLoading] = useState(false);
@@ -115,7 +118,6 @@ export function StocksPageClient({
       setAnalysis(null);
       setAnalysisError("");
       setAnalysisLoading(false);
-      setAiLoading(false);
       return () => {
         cancelled = true;
       };
@@ -127,7 +129,6 @@ export function StocksPageClient({
     if (canReuseAnalysis) {
       setAnalysisError("");
       setAnalysisLoading(false);
-      setAiLoading(false);
       return () => {
         cancelled = true;
       };
@@ -167,31 +168,47 @@ export function StocksPageClient({
       };
     }
 
-    // 已经有该股票的基础分析，仅缺 AI：后台增量加载，保留现有图表可见。
-    setAiLoading(true);
-    getStockAnalysis(selected.code, { includeAi: true, requestId: initialRequestId })
-      .then((full) => {
-        if (cancelled) {
-          return;
+    // 已经有该股票的基础分析，仅缺 AI：流式增量加载，逐字写出报告，保留图表可见。
+    const controller = new AbortController();
+    setAiStreaming(true);
+    setAiStreamText("");
+    setAiStreamStage(null);
+    streamStockAnalysis(selected.code, {
+      signal: controller.signal,
+      onStage: (stage) => {
+        if (cancelled) return;
+        if (stage.message) {
+          setAiStreamStage({ message: stage.message, pct: stage.progress_pct });
         }
-        setAnalysis(full);
+      },
+      onToken: (delta) => {
+        if (cancelled) return;
+        setAiStreamText((prev) => prev + delta);
+      },
+      onResult: (payload) => {
+        if (cancelled) return;
+        setAnalysis(payload);
         setAnalysisIncludesAi(true);
-      })
+      },
+      onError: (message) => {
+        if (cancelled) return;
+        setAnalysisError(message || "AI 分析生成失败");
+      },
+    })
       .catch((error) => {
-        if (cancelled) {
-          return;
-        }
+        if (cancelled || controller.signal.aborted) return;
         // AI 补充失败时保留已显示的基础分析，仅提示 AI 部分出错。
         setAnalysisError(error instanceof Error ? error.message : "AI 分析生成失败");
       })
       .finally(() => {
-        if (!cancelled) {
-          setAiLoading(false);
-        }
+        if (cancelled) return;
+        setAiStreaming(false);
+        setAiStreamStage(null);
       });
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [analysis?.stock_code, analysisIncludesAi, initialRequestId, selected, shouldLoadAi]);
 
@@ -246,7 +263,7 @@ export function StocksPageClient({
   }, [loadedNewsCode, selected, shouldLoadNews]);
 
   return (
-    <>
+    <div className="stocks-page">
       <section className="panel section">
         <h1>单股分析</h1>
         <p className="muted">围绕一只股票集中展示技术指标、AI 观点和相关新闻，帮你快速判断是否值得出手或继续持有。</p>
@@ -330,7 +347,10 @@ export function StocksPageClient({
               <span>
                 现价 <strong>{analysis.quote.current_price.toFixed(2)}</strong>
               </span>
-              <span className={analysis.quote.change_pct >= 0 ? "signal-up" : "signal-down"}>
+              <span
+                className={`stocks-focus-change ${analysis.quote.change_pct >= 0 ? "signal-up" : "signal-down"}`}
+              >
+                {analysis.quote.change_pct >= 0 ? "+" : ""}
                 {analysis.quote.change_pct.toFixed(2)}%
               </span>
             </div>
@@ -399,8 +419,40 @@ export function StocksPageClient({
                   title="AI 分析已锁定"
                   description="解锁后可以查看更长的 AI 观点、结论和操作建议。"
                 />
-              ) : shouldLoadAi && aiLoading && !analysisIncludesAi ? (
-                <p className="muted">AI 正在生成分析报告，行情与指标已就绪，请稍候…</p>
+              ) : shouldLoadAi && aiStreaming && !aiStreamText ? (
+                <div className="ai-thinking" aria-live="polite" aria-busy="true">
+                  <span className="ai-thinking-orb" aria-hidden="true" />
+                  <div className="ai-thinking-copy">
+                    <strong className="ai-thinking-title">
+                      AI 正在思考
+                      <span className="ai-thinking-dots" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    </strong>
+                    <span className="ai-thinking-step">
+                      {aiStreamStage?.message || "正在准备分析上下文"}
+                      {aiStreamStage ? ` · ${aiStreamStage.pct}%` : ""}
+                    </span>
+                  </div>
+                  <span className="ai-thinking-shimmer" aria-hidden="true" />
+                </div>
+              ) : shouldLoadAi && aiStreaming ? (
+                <>
+                  <div className="ai-stream-status" aria-live="polite">
+                    <span className="ai-stream-dot" aria-hidden="true" />
+                    <span className="ai-stream-message">
+                      {aiStreamStage?.message || "AI 正在逐字生成报告…"}
+                    </span>
+                    {aiStreamStage ? <span className="ai-stream-pct">{aiStreamStage.pct}%</span> : null}
+                  </div>
+                  <AICarousel
+                    content={aiStreamText}
+                    stockName={analysis.stock_name || selected.name}
+                    stockCode={analysis.stock_code || selected.code}
+                  />
+                </>
               ) : shouldLoadAi && analysis.ai_insight.enabled ? (
                 <AICarousel
                   content={analysis.ai_insight.content || analysis.ai_insight.error || ""}
@@ -447,7 +499,7 @@ export function StocksPageClient({
           </section>
         </>
       ) : null}
-    </>
+    </div>
   );
 }
 

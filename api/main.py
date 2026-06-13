@@ -814,13 +814,40 @@ async def stream_stock_analysis(
                 meta=meta,
             )
 
+        # 轻量合并增量，减少 SSE 事件数（同时保持打字机般的流畅度）
+        token_buffer: list[str] = []
+
+        def flush_tokens() -> None:
+            if not token_buffer:
+                return
+            text = "".join(token_buffer)
+            token_buffer.clear()
+            _emit_stock_progress(
+                queue,
+                loop,
+                kind="token",
+                stage="ai_streaming",
+                progress_pct=90,
+                message="",
+                stock_code=normalized_code,
+                meta={"delta": text},
+            )
+
+        def token_emit(delta: str) -> None:
+            token_buffer.append(delta)
+            if sum(len(part) for part in token_buffer) >= 4:
+                flush_tokens()
+
         try:
             payload = await asyncio.to_thread(
-                stock_service.get_stock_analysis,
-                stock_code,
-                include_ai,
-                report,
+                lambda: stock_service.get_stock_analysis(
+                    stock_code,
+                    include_ai,
+                    report,
+                    token_callback=token_emit,
+                )
             )
+            flush_tokens()
             _emit_stock_progress(
                 queue,
                 loop,
@@ -852,7 +879,10 @@ async def stream_stock_analysis(
                 message="分析流已结束",
                 stock_code=normalized_code,
             )
-            await queue.put(None)
+            # 终止哨兵必须经由同一个 call_soon_threadsafe FIFO 入队，否则在无界队列上
+            # `await queue.put(None)` 会同步插队到尚未执行的 result/done 回调之前，
+            # 导致 iter_sse 先取到 None 而丢掉 result/done 事件。
+            loop.call_soon_threadsafe(queue.put_nowait, None)
 
     asyncio.create_task(runner())
     return sse_response(queue)

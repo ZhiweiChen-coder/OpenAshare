@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type MarketPhase = {
+export type MarketPhase = {
   label: string;
   tone: string;
   summary: string;
@@ -10,12 +10,12 @@ type MarketPhase = {
   progress: number;
 };
 
-type ResearchPulseLocale = "zh" | "en";
+export type ResearchPulseLocale = "zh" | "en";
 
 const MINUTE = 60 * 1000;
 const CHINA_TIME_ZONE = "Asia/Shanghai";
 
-function getChinaClock(date: Date, locale: ResearchPulseLocale) {
+export function getChinaClock(date: Date, locale: ResearchPulseLocale) {
   const parts = new Intl.DateTimeFormat(locale === "en" ? "en-US" : "zh-CN", {
     timeZone: CHINA_TIME_ZONE,
     hour: "2-digit",
@@ -31,7 +31,7 @@ function getChinaClock(date: Date, locale: ResearchPulseLocale) {
   };
 }
 
-function getMarketPhase(minutes: number, locale: ResearchPulseLocale): MarketPhase {
+export function getMarketPhase(minutes: number, locale: ResearchPulseLocale): MarketPhase {
   const open = 9 * 60 + 30;
   const lunch = 11 * 60 + 30;
   const afternoon = 13 * 60;

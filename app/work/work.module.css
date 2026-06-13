@@ -1,0 +1,147 @@
+/* =====================================================================
+ * /work 工作台 · 局部样式（阶段1 重设计 + 阶段2 样式抽离首例）
+ * 仅接管 work 专属布局；共享基元（SearchForm / ResearchPulse 等子组件）
+ * 仍由其各自样式负责，本文件不干预。
+ * ===================================================================== */
+
+.page {
+  display: grid;
+  gap: var(--space-5);
+}
+
+/* ---- Hero 双栏 ------------------------------------------------------ */
+.hero {
+  display: grid;
+  grid-template-columns: 1.45fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.heroCopy {
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-6) calc(var(--space-6) + var(--space-1));
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at top left, rgba(190, 91, 54, 0.16), transparent 44%),
+    radial-gradient(circle at bottom right, rgba(15, 138, 123, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(247, 242, 234, 0.97));
+}
+
+/* 编辑风装饰：极淡的坐标网格纹理，向右下角渐隐，呼应「今日盘面」面板 */
+.heroCopy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(19, 19, 19, 0.045) 1px, transparent 1px),
+    linear-gradient(rgba(19, 19, 19, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(circle at 86% 90%, rgba(0, 0, 0, 0.55), transparent 56%);
+  mask-image: radial-gradient(circle at 86% 90%, rgba(0, 0, 0, 0.55), transparent 56%);
+  pointer-events: none;
+}
+
+.heroCopy > * {
+  position: relative;
+  z-index: 1;
+}
+
+.topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgba(190, 91, 54, 0.1);
+  color: var(--brand);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--brand);
+}
+
+/* ---- 语言切换 ------------------------------------------------------ */
+.langSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid rgba(19, 19, 19, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.langSwitch a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.langSwitch a:hover {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.langSwitch a.active {
+  background: var(--surface-contrast);
+  color: #fffaf1;
+}
+
+/* ---- 标题区 -------------------------------------------------------- */
+.title {
+  margin: var(--space-4) 0 var(--space-3);
+  font-size: clamp(2rem, 3.6vw, 3.3rem);
+  line-height: 1.12;
+  letter-spacing: -0.024em;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.intro {
+  margin: 0 0 var(--space-5);
+  max-width: 52ch;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* ---- 右侧栈 -------------------------------------------------------- */
+.sideStack {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+/* ---- 响应式 -------------------------------------------------------- */
+@media (max-width: 960px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+  .heroCopy {
+    padding: var(--space-5);
+  }
+}

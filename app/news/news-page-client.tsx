@@ -203,69 +203,15 @@ export function NewsPageClient() {
           {!showAgentGate && agentStatus === "error" ? <p className="muted">Agent 摘要加载失败：{agentError}</p> : null}
 
           {!showAgentGate && agentStatus === "ok" && agentResponse ? (
-            <>
-              <div className="summary-overview-card">
-                <div className="summary-overview-topline">
-                  <span className="summary-overview-label">重点结论</span>
+            <div className="summary-overview-card">
+              <div className="summary-overview-topline">
+                <span className="summary-overview-label">重点结论</span>
+                {formatIntentLabel(agentResponse.intent) ? (
                   <span className="summary-overview-intent">{formatIntentLabel(agentResponse.intent)}</span>
-                </div>
-                <h3>{summaryLead.title}</h3>
-                <p>{summaryLead.description}</p>
+                ) : null}
               </div>
-
-              {summarySections.length ? (
-                <div className="summary-section-grid">
-                  {summarySections.map((section, index) => (
-                    <article className="summary-section-card" key={`${section.title}-${index}`}>
-                      <div className="summary-section-head">
-                        <span className="summary-section-index">{String(index + 1).padStart(2, "0")}</span>
-                        <h3>{section.title}</h3>
-                      </div>
-                      {section.paragraphs.length ? (
-                        <div className="summary-paragraph-list">
-                          {section.paragraphs.map((paragraph) => (
-                            <p key={paragraph}>{paragraph}</p>
-                          ))}
-                        </div>
-                      ) : null}
-                      {section.bullets.length ? (
-                        <ul className="summary-bullet-list">
-                          {section.bullets.map((bullet) => (
-                            <li key={bullet}>{bullet}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {section.table ? (
-                        <div className="summary-table-wrap">
-                          <table className="summary-table">
-                            <thead>
-                              <tr>
-                                {section.table.headers.map((header) => (
-                                  <th key={header}>{header}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {section.table.rows.map((row, rowIndex) => (
-                                <tr key={`${section.title}-row-${rowIndex}`}>
-                                  {section.table?.headers.map((header, cellIndex) => (
-                                    <td key={`${header}-${cellIndex}`}>{row[cellIndex] ?? ""}</td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="summary-text-flow">
-                  <p>{agentResponse.summary}</p>
-                </div>
-              )}
-
+              <h3>{summaryLead.title}</h3>
+              <p>{summaryLead.description}</p>
               {agentResponse.actions.length ? (
                 <div className="news-action-row">
                   {agentResponse.actions.map((action) => (
@@ -275,10 +221,30 @@ export function NewsPageClient() {
                   ))}
                 </div>
               ) : null}
-            </>
+            </div>
           ) : null}
 
-          {agentStatus === "idle" ? <p className="muted">等待加载...</p> : null}
+          {newsStatus === "ok" && topicGroups.length ? (
+            <div className="summary-topics">
+              <div className="summary-topics-head">
+                <div className="section-kicker">Topics</div>
+                <h3>全球热点主题</h3>
+              </div>
+              <div className="topic-strip-grid">
+                {topicGroups.map((group) => (
+                  <article className="topic-strip-card" key={group.topic}>
+                    <div className="topic-strip-head">
+                      <h3>{group.topic}</h3>
+                      <span>{group.count} 条</span>
+                    </div>
+                    <p>{truncate(group.summary, 88)}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {agentStatus === "idle" && !topicGroups.length ? <p className="muted">等待加载...</p> : null}
         </section>
 
         {newsStatus === "loading" ? (
@@ -315,28 +281,6 @@ export function NewsPageClient() {
             <button className="button ghost" type="button" onClick={loadNews}>
               重试新闻
             </button>
-          </section>
-        ) : null}
-
-        {newsStatus === "ok" && topicGroups.length ? (
-          <section className="panel section topic-strip-panel">
-            <div className="news-section-head">
-              <div>
-                <div className="section-kicker">Topics</div>
-                <h2>全球热点主题</h2>
-              </div>
-            </div>
-            <div className="topic-strip-grid">
-              {topicGroups.map((group) => (
-                <article className="topic-strip-card" key={group.topic}>
-                  <div className="topic-strip-head">
-                    <h3>{group.topic}</h3>
-                    <span>{group.count} 条</span>
-                  </div>
-                  <p>{truncate(group.summary, 88)}</p>
-                </article>
-              ))}
-            </div>
           </section>
         ) : null}
 

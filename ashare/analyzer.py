@@ -499,6 +499,7 @@ class StockAnalyzer:
         stock_data: Dict,
         analysis_depth: str,
         progress_callback: Optional[Callable[[int, str], None]] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
     ) -> Optional[str]:
         """
         生成单股深度分析
@@ -616,7 +617,7 @@ class StockAnalyzer:
             report(46, "分析上下文整理完成，准备调用 AI 生成报告")
             
             # 调用LLM生成单股分析
-            analysis_text = self.llm.generate_single_stock_analysis(detailed_data, progress_callback=progress_callback)
+            analysis_text = self.llm.generate_single_stock_analysis(detailed_data, progress_callback=progress_callback, token_callback=token_callback)
             
             if analysis_text:
                 logger.info(f"{stock_name} 单股分析生成成功")

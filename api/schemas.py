@@ -346,7 +346,7 @@ class AgentResponse(BaseModel):
 
 
 class ProgressEventBase(BaseModel):
-    kind: Literal["start", "progress", "result", "error", "done"]
+    kind: Literal["start", "progress", "token", "result", "error", "done"]
     flow: Literal["stock_analysis", "agent_query"]
     stage: str
     progress_pct: int = Field(ge=0, le=100)

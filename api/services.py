@@ -410,6 +410,7 @@ class StockAnalysisService:
         include_ai: bool = True,
         progress_callback: Optional[ProgressCallback] = None,
         request_id: Optional[str] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
     ) -> AnalyzerBundle:
         normalized = normalize_stock_code(stock_code)
         if progress_callback:
@@ -486,6 +487,7 @@ class StockAnalysisService:
                 analysis,
                 "深度分析",
                 progress_callback=report_ai,
+                token_callback=token_callback,
             )
             analyzer.llm = None
         if include_ai and analyzer.llm:
@@ -521,6 +523,7 @@ class StockAnalysisService:
         include_ai: bool = True,
         progress_callback: Optional[ProgressCallback] = None,
         request_id: Optional[str] = None,
+        token_callback: Optional[Callable[[str], None]] = None,
     ) -> StockAnalysisResponse:
         normalized = normalize_stock_code(stock_code)
         runtime_config = self._runtime_config()
@@ -547,6 +550,7 @@ class StockAnalysisService:
             include_ai=include_ai,
             progress_callback=progress_callback,
             request_id=request_id,
+            token_callback=token_callback,
         )
         basic_data = bundle.analysis.get("基础数据", {})
         latest = bundle.dataframe.iloc[-1]
@@ -681,27 +685,39 @@ class NewsService:
         if cached is not None:
             return cached
 
+        # 实时新闻为主（最新）：直接抓取，结果缓存 120s。
+        fetched = self.tracker.fetch_stock_news(normalized, resolved_name)
+        live_items = [self._map_fetched_news(normalized, resolved_name, item) for item in fetched]
+
+        # 监控存储为补充：去重后置于实时之后，避免旧告警挡住最新新闻。
         stored_items = [
-            item
+            self._map_alert_to_news(item)
             for item in self.state_store.get_recent_alerts(limit=limit * 5)
             if item["stock_code"] == normalized and item["event_type"] == "news"
         ]
-        news_items = self._prioritize_stock_news(
-            [self._map_alert_to_news(item) for item in stored_items],
-            limit=limit,
-        )
 
-        if news_items:
-            self._response_cache.set(cache_key, news_items, 120)
-            return news_items
-
-        fetched = self.tracker.fetch_stock_news(normalized, resolved_name)
-        result = self._prioritize_stock_news(
-            [self._map_fetched_news(normalized, resolved_name, item) for item in fetched],
-            limit=limit,
-        )
+        merged = self._merge_stock_news(live_items, stored_items)
+        result = self._prioritize_stock_news(merged, limit=limit)
         self._response_cache.set(cache_key, result, 120)
         return result
+
+    @staticmethod
+    def _news_dedupe_key(item: NewsItem) -> str:
+        return normalize_text(item.title).strip().lower()
+
+    def _merge_stock_news(
+        self, live_items: List[NewsItem], stored_items: List[NewsItem]
+    ) -> List[NewsItem]:
+        """实时新闻在前，监控存储去重后补充在后（按标题去重）。"""
+        merged: List[NewsItem] = []
+        seen: set[str] = set()
+        for item in [*live_items, *stored_items]:
+            key = self._news_dedupe_key(item)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
 
     def get_global_news(self, limit: int = 20) -> List[GlobalNewsItem]:
         cache_key = f"global_news:{limit}"
