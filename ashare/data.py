@@ -7,7 +7,15 @@
 import pandas as pd
 from typing import Dict, List, Optional
 from ashare.logging import get_logger
-from ashare.stock_pool import get_exchange_label, is_valid_stock_code, normalize_stock_code
+from ashare.stock_pool import (
+    extract_symbol,
+    get_exchange_label,
+    is_us_stock,
+    is_valid_stock_code,
+    normalize_stock_code,
+)
+
+logger = get_logger(__name__)
 
 # 尝试导入数据源（pip 的 ashare 包可能与项目根目录 Ashare.py 冲突，用文件路径显式加载）
 as_api = None
@@ -35,7 +43,7 @@ try:
                     if hasattr(mod, "get_price"):
                         return mod
             except Exception as ex:
-                print(f"警告: 加载 {path} 失败: {ex}")
+                logger.warning("加载 %s 失败: %s", path, ex)
         return None
 
     as_api = _load_ashare_module()
@@ -46,12 +54,10 @@ try:
             as_api = None
 except Exception as e:
     as_api = None
-    print(f"警告: 无法加载Ashare数据源模块: {e}")
+    logger.warning("无法加载 Ashare 数据源模块: %s", e)
 
 if as_api is None:
-    print("警告: as_api 未就绪，将使用 akshare 作为日线数据源备选")
-
-logger = get_logger(__name__)
+    logger.warning("as_api 未就绪，将使用 akshare 作为日线数据源备选")
 
 
 class DataFetcher:
@@ -93,14 +99,18 @@ class DataFetcher:
         try:
             logger.info(f"正在获取股票 {code} 的数据...")
             df = None
-            if as_api is not None and hasattr(as_api, "get_price"):
-                try:
-                    df = as_api.get_price(code, count=count, frequency=frequency)
-                except Exception as ex:
-                    logger.warning("Ashare.get_price failed for %s: %s", code, ex)
-                    df = None
-            if (df is None or (isinstance(df, pd.DataFrame) and df.empty)) and frequency == "1d":
-                df = self._fetch_stock_data_akshare(code, count)
+            if is_us_stock(code):
+                # 美股走独立链路：yfinance 主源，Finnhub 备选
+                df = self._fetch_stock_data_us(code, count, frequency)
+            else:
+                if as_api is not None and hasattr(as_api, "get_price"):
+                    try:
+                        df = as_api.get_price(code, count=count, frequency=frequency)
+                    except Exception as ex:
+                        logger.warning("Ashare.get_price failed for %s: %s", code, ex)
+                        df = None
+                if (df is None or (isinstance(df, pd.DataFrame) and df.empty)) and frequency == "1d":
+                    df = self._fetch_stock_data_akshare(code, count)
             
             # 检查数据是否有效
             if df is None or df.empty:
@@ -197,6 +207,145 @@ class DataFetcher:
             'cache_keys': list(self.data_cache.keys())
         }
     
+    # ------------------------------------------------------------------
+    # 美股数据源
+    # ------------------------------------------------------------------
+    # yfinance 频率映射
+    _YF_INTERVAL = {
+        "1d": "1d", "1w": "1wk", "1M": "1mo",
+        "60m": "60m", "30m": "30m", "15m": "15m", "5m": "5m", "1m": "1m",
+    }
+    # Finnhub 频率映射（resolution）
+    _FINNHUB_RESOLUTION = {
+        "1d": "D", "1w": "W", "1M": "M",
+        "60m": "60", "30m": "30", "15m": "15", "5m": "5", "1m": "1",
+    }
+    # 估算需要回溯的自然日数（按频率把 count 转成日历跨度，留足非交易日冗余）
+    _LOOKBACK_DAYS_PER_BAR = {
+        "1d": 2, "1w": 9, "1M": 40,
+        "60m": 1, "30m": 1, "15m": 1, "5m": 1, "1m": 1,
+    }
+
+    @staticmethod
+    def _us_yf_symbol(code: str) -> str:
+        """US.BRK.B -> BRK-B（yfinance 用 ``-`` 表示类别股）。"""
+        return extract_symbol(code).replace(".", "-")
+
+    def _fetch_stock_data_us(self, code: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
+        """美股行情：yfinance 主源，失败时降级到 Finnhub。"""
+        df = self._fetch_stock_data_yfinance(code, count, frequency)
+        if df is not None and not df.empty:
+            return df
+        logger.info("yfinance 未取到 %s 数据，尝试 Finnhub 备选源", code)
+        return self._fetch_stock_data_finnhub(code, count, frequency)
+
+    def _fetch_stock_data_yfinance(self, code: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
+        try:
+            import yfinance as yf
+        except ImportError:
+            logger.warning("yfinance 未安装，无法获取美股数据")
+            return None
+
+        interval = self._YF_INTERVAL.get(frequency)
+        if interval is None:
+            logger.warning("yfinance 不支持的频率: %s", frequency)
+            return None
+
+        symbol = self._us_yf_symbol(code)
+        lookback = max(7, count * self._LOOKBACK_DAYS_PER_BAR.get(frequency, 2))
+        start = (pd.Timestamp.now() - pd.Timedelta(days=lookback)).strftime("%Y-%m-%d")
+        end = (pd.Timestamp.now() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        try:
+            raw = yf.download(
+                symbol, start=start, end=end, interval=interval,
+                auto_adjust=True, progress=False, threads=False,
+            )
+        except Exception as e:
+            logger.warning("yfinance download failed %s: %s", symbol, e)
+            return None
+        return self._normalize_us_dataframe(raw, count, source=f"yfinance({symbol})")
+
+    def _normalize_us_dataframe(self, raw, count: int, source: str) -> Optional[pd.DataFrame]:
+        if raw is None or raw.empty:
+            return None
+        df = raw.copy()
+        # yfinance 多 ticker 时返回 MultiIndex 列，单 ticker 也可能带一层，统一压平
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        col_map = {"Open": "open", "Close": "close", "High": "high", "Low": "low", "Volume": "volume"}
+        rename = {k: v for k, v in col_map.items() if k in df.columns}
+        df = df.rename(columns=rename)
+        for c in ["open", "close", "high", "low", "volume"]:
+            if c not in df.columns:
+                logger.warning("%s 缺少必要列 %s", source, c)
+                return None
+        df = df[["open", "close", "high", "low", "volume"]].astype(float)
+        df.index = pd.to_datetime(df.index)
+        df.index.name = ""
+        df.columns.name = None
+        df = df.dropna().tail(count)
+        if df.empty:
+            return None
+        logger.info("%s 成功，共 %d 条", source, len(df))
+        return df
+
+    def _fetch_stock_data_finnhub(self, code: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
+        try:
+            from ashare.config import Config
+        except ImportError:
+            Config = None
+        api_key = None
+        if Config is not None:
+            try:
+                api_key = Config().finnhub_api_key
+            except Exception:
+                api_key = None
+        if not api_key:
+            logger.info("未配置 FINNHUB_API_KEY，跳过 Finnhub 备选源")
+            return None
+
+        resolution = self._FINNHUB_RESOLUTION.get(frequency)
+        if resolution is None:
+            logger.warning("Finnhub 不支持的频率: %s", frequency)
+            return None
+
+        symbol = extract_symbol(code).replace(".", "-")
+        lookback = max(7, count * self._LOOKBACK_DAYS_PER_BAR.get(frequency, 2))
+        to_ts = int(pd.Timestamp.now().timestamp())
+        from_ts = int((pd.Timestamp.now() - pd.Timedelta(days=lookback)).timestamp())
+        try:
+            import requests
+            resp = requests.get(
+                "https://finnhub.io/api/v1/stock/candle",
+                params={"symbol": symbol, "resolution": resolution,
+                        "from": from_ts, "to": to_ts, "token": api_key},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            logger.warning("Finnhub request failed %s: %s", symbol, e)
+            return None
+
+        if not isinstance(payload, dict) or payload.get("s") != "ok":
+            logger.warning("Finnhub 返回无效数据 %s: status=%s", symbol, payload.get("s") if isinstance(payload, dict) else payload)
+            return None
+        try:
+            df = pd.DataFrame({
+                "open": payload["o"], "close": payload["c"],
+                "high": payload["h"], "low": payload["l"],
+                "volume": payload["v"],
+            }, index=pd.to_datetime(payload["t"], unit="s")).astype(float)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning("Finnhub 数据解析失败 %s: %s", symbol, e)
+            return None
+        df.index.name = ""
+        df = df.dropna().tail(count)
+        if df.empty:
+            return None
+        logger.info("Finnhub(%s) 成功，共 %d 条", symbol, len(df))
+        return df
+
     def _fetch_stock_data_akshare(self, code: str, count: int) -> Optional[pd.DataFrame]:
         """
         akshare 日线备选：当 Ashare.get_price 不可用时使用。

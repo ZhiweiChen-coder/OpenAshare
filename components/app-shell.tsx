@@ -174,13 +174,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 const NAV_ITEMS = [
-  { href: "/work", label: "工作台", labelEn: "Workbench" },
-  { href: "/stocks", label: "单股分析", labelEn: "Stocks" },
-  { href: "/charts", label: "K 线图", labelEn: "Charts" },
-  { href: "/portfolio", label: "持仓页", labelEn: "Portfolio" },
-  { href: "/news", label: "消息页", labelEn: "News" },
-  { href: "/hotspots", label: "热点页", labelEn: "Hotspots" },
-  { href: "/settings", label: "设置", labelEn: "Settings" },
+  {
+    href: "/work",
+    label: "工作台",
+    labelEn: "Workbench",
+  },
+  {
+    href: "/stocks",
+    label: "单股分析",
+    labelEn: "Stocks",
+  },
+  {
+    href: "/portfolio",
+    label: "持仓页",
+    labelEn: "Portfolio",
+  },
+  {
+    href: "/news",
+    label: "消息页",
+    labelEn: "News",
+  },
+  {
+    href: "/hotspots",
+    label: "热点页",
+    labelEn: "Hotspots",
+  },
+  {
+    href: "/settings",
+    label: "设置",
+    labelEn: "Settings",
+  },
 ] as const;
 
 export function Nav() {

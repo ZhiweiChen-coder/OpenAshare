@@ -89,6 +89,55 @@ BASE_STOCK_CATALOG: Dict[str, Dict[str, str]] = {
     "华润三九": {"code": "sz000999", "market": "A股-深圳", "category": "医药"},
     "丽珠集团": {"code": "sz000513", "market": "A股-深圳", "category": "医药"},
     "长春高新": {"code": "sz000661", "market": "A股-深圳", "category": "医药"},
+    # 美股龙头（含中文名映射，方便中文搜索）
+    "苹果": {"code": "US.AAPL", "market": "美股", "category": "科技"},
+    "微软": {"code": "US.MSFT", "market": "美股", "category": "科技"},
+    "英伟达": {"code": "US.NVDA", "market": "美股", "category": "半导体"},
+    "谷歌": {"code": "US.GOOGL", "market": "美股", "category": "科技"},
+    "谷歌C": {"code": "US.GOOG", "market": "美股", "category": "科技"},
+    "亚马逊": {"code": "US.AMZN", "market": "美股", "category": "电商"},
+    "Meta": {"code": "US.META", "market": "美股", "category": "科技"},
+    "脸书": {"code": "US.META", "market": "美股", "category": "科技"},
+    "特斯拉": {"code": "US.TSLA", "market": "美股", "category": "新能源车"},
+    "博通": {"code": "US.AVGO", "market": "美股", "category": "半导体"},
+    "台积电": {"code": "US.TSM", "market": "美股", "category": "半导体"},
+    "AMD": {"code": "US.AMD", "market": "美股", "category": "半导体"},
+    "英特尔": {"code": "US.INTC", "market": "美股", "category": "半导体"},
+    "高通": {"code": "US.QCOM", "market": "美股", "category": "半导体"},
+    "美光": {"code": "US.MU", "market": "美股", "category": "半导体"},
+    "奈飞": {"code": "US.NFLX", "market": "美股", "category": "科技"},
+    "甲骨文": {"code": "US.ORCL", "market": "美股", "category": "科技"},
+    "Adobe": {"code": "US.ADBE", "market": "美股", "category": "科技"},
+    "Salesforce": {"code": "US.CRM", "market": "美股", "category": "科技"},
+    "伯克希尔": {"code": "US.BRK.B", "market": "美股", "category": "金融"},
+    "摩根大通": {"code": "US.JPM", "market": "美股", "category": "金融"},
+    "visa": {"code": "US.V", "market": "美股", "category": "金融"},
+    "万事达": {"code": "US.MA", "market": "美股", "category": "金融"},
+    "美国银行": {"code": "US.BAC", "market": "美股", "category": "金融"},
+    "强生": {"code": "US.JNJ", "market": "美股", "category": "医药"},
+    "礼来": {"code": "US.LLY", "market": "美股", "category": "医药"},
+    "联合健康": {"code": "US.UNH", "market": "美股", "category": "医疗"},
+    "辉瑞": {"code": "US.PFE", "market": "美股", "category": "医药"},
+    "可口可乐": {"code": "US.KO", "market": "美股", "category": "消费"},
+    "百事": {"code": "US.PEP", "market": "美股", "category": "消费"},
+    "麦当劳": {"code": "US.MCD", "market": "美股", "category": "消费"},
+    "星巴克": {"code": "US.SBUX", "market": "美股", "category": "消费"},
+    "耐克": {"code": "US.NKE", "market": "美股", "category": "消费"},
+    "沃尔玛": {"code": "US.WMT", "market": "美股", "category": "零售"},
+    "好市多": {"code": "US.COST", "market": "美股", "category": "零售"},
+    "迪士尼": {"code": "US.DIS", "market": "美股", "category": "传媒"},
+    "波音": {"code": "US.BA", "market": "美股", "category": "工业"},
+    "埃克森美孚": {"code": "US.XOM", "market": "美股", "category": "能源"},
+    "雪佛龙": {"code": "US.CVX", "market": "美股", "category": "能源"},
+    "Palantir": {"code": "US.PLTR", "market": "美股", "category": "科技"},
+    "超微电脑": {"code": "US.SMCI", "market": "美股", "category": "科技"},
+    "阿斯麦": {"code": "US.ASML", "market": "美股", "category": "半导体"},
+    "Coinbase": {"code": "US.COIN", "market": "美股", "category": "金融科技"},
+    "Uber": {"code": "US.UBER", "market": "美股", "category": "科技"},
+    # 美股主要指数 ETF / 指数
+    "标普500": {"code": "US.SPY", "market": "美股", "category": "指数"},
+    "纳斯达克100": {"code": "US.QQQ", "market": "美股", "category": "指数"},
+    "道琼斯": {"code": "US.DIA", "market": "美股", "category": "指数"},
 }
 
 
@@ -179,8 +228,20 @@ def get_base_stock_catalog() -> Dict[str, Dict[str, str]]:
     }
 
 
+US_TICKER_PATTERN = r"[A-Z]{1,5}(\.[A-Z]{1,2})?"
+
+
 def normalize_stock_code(code: str) -> str:
-    """标准化股票代码格式。"""
+    """标准化股票代码格式。
+
+    支持三类市场：
+      - A股：``sh######`` / ``sz######``
+      - 港股：``#####.HK``
+      - 美股：``US.TICKER``（如 ``US.AAPL``、``US.BRK.B``）
+
+    美股统一加 ``US.`` 前缀，以便和港股 ``.HK``、A股数字代码区分，避免
+    诸如 ``BRK.B`` 这类含点的代码被误判成港股。
+    """
     raw = code.strip()
     if not raw:
         return raw
@@ -200,6 +261,13 @@ def normalize_stock_code(code: str) -> str:
         symbol = upper.split(".")[0].zfill(5)
         return f"{symbol}.HK"
 
+    # 美股：显式 ``US.`` 前缀
+    if upper.startswith("US.") and re.fullmatch(US_TICKER_PATTERN, upper[3:]):
+        return f"US.{upper[3:]}"
+    # 美股：裸 ticker（纯字母，区别于全数字的 A股/港股代码）
+    if re.fullmatch(US_TICKER_PATTERN, upper):
+        return f"US.{upper}"
+
     return raw
 
 
@@ -209,6 +277,8 @@ def extract_symbol(code: str) -> str:
         return normalized[2:]
     if normalized.upper().endswith(".HK"):
         return normalized[:-3]
+    if normalized.upper().startswith("US."):
+        return normalized[3:]
     return normalized
 
 
@@ -222,6 +292,8 @@ def infer_market(code: str) -> str:
         return "sz"
     if upper.endswith(".HK"):
         return "hk"
+    if upper.startswith("US."):
+        return "us"
     return "unknown"
 
 
@@ -232,6 +304,7 @@ def is_valid_stock_code(code: str) -> bool:
     return bool(
         re.fullmatch(r"(sh|sz)\d{6}", lower)
         or re.fullmatch(r"\d{5}\.HK", upper)
+        or re.fullmatch(rf"US\.{US_TICKER_PATTERN}", upper)
     )
 
 
@@ -253,6 +326,8 @@ def get_market_label(code: str) -> str:
         return "A股-深圳"
     if upper.endswith(".HK"):
         return "港股"
+    if upper.startswith("US."):
+        return "美股"
     return "未知市场"
 
 
@@ -264,6 +339,8 @@ def get_exchange_label(code: str) -> str:
         return "深交所"
     if market == "hk":
         return "港交所"
+    if market == "us":
+        return "美股"
     return "未知"
 
 
@@ -284,9 +361,20 @@ def is_hk_stock(code: str) -> bool:
     return bool(re.fullmatch(r"\d{5}\.HK", normalized))
 
 
+def is_us_stock(code: str) -> bool:
+    normalized = normalize_stock_code(code).upper()
+    return bool(re.fullmatch(rf"US\.{US_TICKER_PATTERN}", normalized))
+
+
 def get_monitor_support_level(code: str) -> str:
-    """返回监控支持级别: full, partial, unsupported。"""
+    """返回监控支持级别: full, partial, unsupported。
+
+    A股个股支持完整监控（含资金流/龙虎榜等 A股 特有数据）；美股支持
+    完整的行情与技术面监控，但 A股 特有数据会自动跳过；港股为部分支持。
+    """
     if is_a_share_individual_stock(code):
+        return "full"
+    if is_us_stock(code):
         return "full"
     if is_hk_stock(code):
         return "partial"

@@ -99,6 +99,9 @@ class Config:
     web_search_enabled: bool = field(default_factory=lambda: _env_bool("WEB_SEARCH_ENABLED", True))
     web_search_timeout: int = field(default_factory=lambda: _env_int("WEB_SEARCH_TIMEOUT", 8))
 
+    # 美股数据源：Finnhub 作为 yfinance 的备选源（缺失时自动跳过，仅用 yfinance）
+    finnhub_api_key: Optional[str] = field(default_factory=lambda: _env_text("FINNHUB_API_KEY"))
+
     def __post_init__(self) -> None:
         self.stock_pool_path = Path(self.stock_pool_path)
         self.stock_topics_path = Path(self.stock_topics_path)

@@ -263,6 +263,44 @@ def _warm_read_caches() -> None:
         hotspot_service.list_hotspots(limit=10)
     except Exception:
         logger.exception("Warmup failed for hotspots")
+    _warm_stock_pool()
+
+
+def _warm_stock_pool() -> None:
+    """后台预热股池中部分个股的行情分析（不含 AI），让用户首次点击命中缓存。
+
+    通过 WARMUP_STOCK_LIMIT 控制预热数量（默认 12，设为 0 可关闭）。
+    """
+    try:
+        limit = int(os.getenv("WARMUP_STOCK_LIMIT", "12"))
+    except ValueError:
+        limit = 12
+    if limit <= 0:
+        return
+
+    try:
+        from ashare.stock_pool import load_stock_pool
+
+        pool = load_stock_pool()
+    except Exception:
+        logger.exception("Warmup failed to load stock pool")
+        return
+
+    # 多个别名可能指向同一代码，按出现顺序去重后截断。
+    seen: set[str] = set()
+    codes: list[str] = []
+    for code in pool.values():
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+        if len(codes) >= limit:
+            break
+
+    for code in codes:
+        try:
+            stock_service.get_stock_analysis(code, include_ai=False)
+        except Exception:
+            logger.warning("Warmup failed for stock %s", code, exc_info=True)
 
 
 @asynccontextmanager
@@ -847,7 +885,13 @@ def list_hotspots(request: Request, limit: int = Query(10, ge=1, le=20)) -> Resp
 def list_global_news(request: Request, limit: int = Query(20, ge=1, le=50)) -> Response:
     try:
         payload = news_service.get_global_news(limit=limit)
-        return _cached_json_response(request, payload, max_age=60, stale_while_revalidate=180)
+        return _cached_json_response(
+            request,
+            payload,
+            max_age=60,
+            stale_while_revalidate=180,
+            no_store=not bool(payload),
+        )
     except Exception as exc:
         logger.exception("get_global_news failed")
         return JSONResponse(content=[], headers={"Cache-Control": "no-store"})

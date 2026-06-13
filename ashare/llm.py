@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from typing import Callable, Dict, Any, Optional
 
@@ -6,6 +7,8 @@ import openai
 import pandas as pd
 from openai import OpenAI
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def format_analysis_result(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -396,21 +399,21 @@ class LLMAnalyzer:
         """
         try:
             # 准备数据
-            print("开始准备数据...")
+            logger.debug("开始准备数据...")
             data_str = _format_data_for_prompt(df, technical_indicators)
-            print(f"数据准备完成，数据长度: {len(data_str)}")
+            logger.debug(f"数据准备完成，数据长度: {len(data_str)}")
 
             # 构建消息
-            print("构建API请求消息...")
+            logger.debug("构建API请求消息...")
             messages = [
                 {"role": "system", "content": _create_system_prompt()},
                 {"role": "user", "content": f"请分析以下股票数据并给出专业的分析意见：\n{data_str}"}
             ]
-            print(f"消息构建完成，系统提示词长度: {len(messages[0]['content'])}")
-            print(f"用户消息长度: {len(messages[1]['content'])}")
+            logger.debug(f"消息构建完成，系统提示词长度: {len(messages[0]['content'])}")
+            logger.debug(f"用户消息长度: {len(messages[1]['content'])}")
 
             # 发送请求
-            print("开始发送API请求...")
+            logger.debug("开始发送API请求...")
             try:
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -418,85 +421,85 @@ class LLMAnalyzer:
                     temperature=1.0,
                     stream=False
                 )
-                print("API请求发送成功")
+                logger.debug("API请求发送成功")
             except Exception as api_e:
                 # 检查是否是空响应导致的JSON解析错误
                 if str(api_e).startswith("Expecting value: line 1 column 1 (char 0)"):
-                    print("API返回空响应，服务器可能繁忙")
+                    logger.debug("API返回空响应，服务器可能繁忙")
                     raise APIBusyError("API服务器繁忙，返回空响应") from api_e
-                print(f"API请求发送失败: {str(api_e)}")
+                logger.debug(f"API请求发送失败: {str(api_e)}")
                 raise  # 重新抛出其他类型的异常
 
             # 记录原始响应以便调试
-            print("API 原始响应类型:", type(response))
-            print("API 原始响应内容:", response)
+            logger.debug("API 原始响应类型:", type(response))
+            logger.debug("API 原始响应内容:", response)
 
             # 检查响应内容
             if not response:
-                print("API返回空响应")
+                logger.debug("API返回空响应")
                 return format_analysis_result({})
 
             if not hasattr(response, 'choices'):
-                print(f"API响应缺少choices属性，响应结构: {dir(response)}")
+                logger.debug(f"API响应缺少choices属性，响应结构: {dir(response)}")
                 return format_analysis_result({})
 
             if not response.choices:
-                print("API响应的choices为空")
+                logger.debug("API响应的choices为空")
                 return format_analysis_result({})
 
             # 解析响应
             try:
                 analysis_text = response.choices[0].message.content
-                print("成功获取分析文本内容")
-                print("分析文本:", analysis_text)
+                logger.debug("成功获取分析文本内容")
+                logger.debug("分析文本:", analysis_text)
             except Exception as text_e:
-                print(f"获取分析文本失败: {str(text_e)}")
+                logger.debug(f"获取分析文本失败: {str(text_e)}")
                 raise
 
             # 将文本响应组织成结构化数据
-            print("开始解析分析文本...")
+            logger.debug("开始解析分析文本...")
             result = _parse_analysis_response(analysis_text)
-            print("分析文本解析完成")
+            logger.debug("分析文本解析完成")
             return result
 
         except APIBusyError as be:  # 处理API繁忙异常
-            print(f"=== API繁忙错误 ===")
-            print(f"错误详情: {str(be)}")
-            print(f"错误类型: {type(be)}")
+            logger.debug(f"=== API繁忙错误 ===")
+            logger.debug(f"错误详情: {str(be)}")
+            logger.debug(f"错误类型: {type(be)}")
             return format_analysis_result({})
         except json.JSONDecodeError as je:
-            print(f"=== JSON解析错误 ===")
-            print(f"错误详情: {str(je)}")
-            print(f"错误类型: {type(je)}")
-            print(f"错误位置: {je.pos}")
-            print(f"错误行列: 行 {je.lineno}, 列 {je.colno}")
-            print(f"错误的文档片段: {je.doc[:100] if je.doc else 'None'}")
+            logger.debug(f"=== JSON解析错误 ===")
+            logger.debug(f"错误详情: {str(je)}")
+            logger.debug(f"错误类型: {type(je)}")
+            logger.debug(f"错误位置: {je.pos}")
+            logger.debug(f"错误行列: 行 {je.lineno}, 列 {je.colno}")
+            logger.debug(f"错误的文档片段: {je.doc[:100] if je.doc else 'None'}")
             return format_analysis_result({})
         except openai.APITimeoutError as te:
-            print(f"=== API超时错误 ===")
-            print(f"错误详情: {str(te)}")
-            print(f"错误类型: {type(te)}")
+            logger.debug(f"=== API超时错误 ===")
+            logger.debug(f"错误详情: {str(te)}")
+            logger.debug(f"错误类型: {type(te)}")
             return format_analysis_result({})
         except openai.APIConnectionError as ce:
-            print(f"=== API连接错误 ===")
-            print(f"错误详情: {str(ce)}")
-            print(f"错误类型: {type(ce)}")
+            logger.debug(f"=== API连接错误 ===")
+            logger.debug(f"错误详情: {str(ce)}")
+            logger.debug(f"错误类型: {type(ce)}")
             return format_analysis_result({})
         except openai.APIError as ae:
-            print(f"=== API错误 ===")
-            print(f"错误详情: {str(ae)}")
-            print(f"错误类型: {type(ae)}")
+            logger.debug(f"=== API错误 ===")
+            logger.debug(f"错误详情: {str(ae)}")
+            logger.debug(f"错误类型: {type(ae)}")
             return format_analysis_result({})
         except openai.RateLimitError as re:
-            print(f"=== API频率限制错误 ===")
-            print(f"错误详情: {str(re)}")
-            print(f"错误类型: {type(re)}")
+            logger.debug(f"=== API频率限制错误 ===")
+            logger.debug(f"错误详情: {str(re)}")
+            logger.debug(f"错误类型: {type(re)}")
             return format_analysis_result({})
         except Exception as e:
-            print(f"=== 未预期的错误 ===")
-            print(f"错误详情: {str(e)}")
-            print(f"错误类型: {type(e)}")
-            print(f"错误追踪:")
+            logger.debug(f"=== 未预期的错误 ===")
+            logger.debug(f"错误详情: {str(e)}")
+            logger.debug(f"错误类型: {type(e)}")
+            logger.debug(f"错误追踪:")
             import traceback
             traceback.print_exc()
             return format_analysis_result({})
@@ -512,7 +515,7 @@ class LLMAnalyzer:
             AI分析文本，失败时返回None
         """
         try:
-            print("开始生成股票池AI分析...")
+            logger.debug("开始生成股票池AI分析...")
             
             # 构建股票池分析的提示词
             pool_info = "股票池综合分析：\n\n"
@@ -553,7 +556,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": pool_info}
             ]
             
-            print("发送股票池分析请求...")
+            logger.debug("发送股票池分析请求...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -563,14 +566,14 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print("股票池AI分析生成成功")
+                logger.debug("股票池AI分析生成成功")
                 return analysis_text
             else:
-                print("股票池AI分析响应为空")
+                logger.debug("股票池AI分析响应为空")
                 return None
                 
         except Exception as e:
-            print(f"生成股票池AI分析失败: {str(e)}")
+            logger.debug(f"生成股票池AI分析失败: {str(e)}")
             return None
 
     def generate_fundamental_analysis(self, fundamental_data: list, analysis_params: Dict[str, Any]) -> Optional[str]:
@@ -585,7 +588,7 @@ class LLMAnalyzer:
             基本面分析文本，失败时返回None
         """
         try:
-            print(f"开始生成基本面分析: {analysis_params['type']}")
+            logger.debug(f"开始生成基本面分析: {analysis_params['type']}")
             
             # 构建基本面分析的数据信息
             fundamental_info = f"基本面分析 - {analysis_params['type']}：\n\n"
@@ -646,7 +649,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": fundamental_info}
             ]
             
-            print("发送基本面分析请求...")
+            logger.debug("发送基本面分析请求...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -656,14 +659,14 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print("基本面分析生成成功")
+                logger.debug("基本面分析生成成功")
                 return analysis_text
             else:
-                print("基本面分析响应为空")
+                logger.debug("基本面分析响应为空")
                 return None
                 
         except Exception as e:
-            print(f"生成基本面分析失败: {str(e)}")
+            logger.debug(f"生成基本面分析失败: {str(e)}")
             return None
 
     def generate_sector_rotation_analysis(self, sector_data: list) -> Optional[str]:
@@ -677,7 +680,7 @@ class LLMAnalyzer:
             板块轮动分析文本，失败时返回None
         """
         try:
-            print("开始生成板块轮动分析...")
+            logger.debug("开始生成板块轮动分析...")
             
             # 构建板块轮动分析数据
             sector_info = "板块轮动分析：\n\n"
@@ -720,7 +723,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": sector_info}
             ]
             
-            print("发送板块轮动分析请求...")
+            logger.debug("发送板块轮动分析请求...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -730,14 +733,14 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print("板块轮动分析生成成功")
+                logger.debug("板块轮动分析生成成功")
                 return analysis_text
             else:
-                print("板块轮动分析响应为空")
+                logger.debug("板块轮动分析响应为空")
                 return None
                 
         except Exception as e:
-            print(f"生成板块轮动分析失败: {str(e)}")
+            logger.debug(f"生成板块轮动分析失败: {str(e)}")
             return None
 
     def generate_trend_strength_analysis(self, trend_data: list) -> Optional[str]:
@@ -751,7 +754,7 @@ class LLMAnalyzer:
             趋势强度分析文本，失败时返回None
         """
         try:
-            print("开始生成趋势强度分析...")
+            logger.debug("开始生成趋势强度分析...")
             
             # 构建趋势强度分析数据
             trend_info = "趋势强度分析：\n\n"
@@ -798,7 +801,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": trend_info}
             ]
             
-            print("发送趋势强度分析请求...")
+            logger.debug("发送趋势强度分析请求...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -808,14 +811,14 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print("趋势强度分析生成成功")
+                logger.debug("趋势强度分析生成成功")
                 return analysis_text
             else:
-                print("趋势强度分析响应为空")
+                logger.debug("趋势强度分析响应为空")
                 return None
                 
         except Exception as e:
-            print(f"生成趋势强度分析失败: {str(e)}")
+            logger.debug(f"生成趋势强度分析失败: {str(e)}")
             return None
 
     def generate_single_stock_analysis(
@@ -837,7 +840,7 @@ class LLMAnalyzer:
                 if progress_callback:
                     progress_callback(progress, message)
 
-            print(f"开始生成 {detailed_data['name']} 的单股分析...")
+            logger.debug(f"开始生成 {detailed_data['name']} 的单股分析...")
             report(56, "正在整理提示词与上下文，准备发送模型请求")
             
             # 构建单股分析数据
@@ -1061,7 +1064,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": stock_info}
             ]
             
-            print("发送单股分析请求...")
+            logger.debug("发送单股分析请求...")
             report(72, "模型请求已发送，正在等待 AI 返回完整报告")
             # 根据分析深度设置不同的max_tokens
             if detailed_data['analysis_depth'] == "快速分析":
@@ -1081,42 +1084,42 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print(f"{detailed_data['name']} 单股分析生成成功")
+                logger.debug(f"{detailed_data['name']} 单股分析生成成功")
                 report(92, "AI 已返回内容，正在整理结果")
                 return analysis_text
             else:
-                print("单股分析响应为空")
+                logger.debug("单股分析响应为空")
                 report(92, "AI 请求已完成，但响应内容为空")
                 return None
                 
         except openai.APIConnectionError as ce:
-            print(f"=== API连接错误 ===")
-            print(f"生成单股分析失败: {str(ce)}")
-            print(f"错误类型: {type(ce)}")
-            print("可能的原因：")
-            print("1. 网络连接问题，请检查网络连接")
-            print("2. API服务不可用，请稍后重试")
-            print("3. 代理设置问题，请检查代理配置")
+            logger.debug(f"=== API连接错误 ===")
+            logger.debug(f"生成单股分析失败: {str(ce)}")
+            logger.debug(f"错误类型: {type(ce)}")
+            logger.debug("可能的原因：")
+            logger.debug("1. 网络连接问题，请检查网络连接")
+            logger.debug("2. API服务不可用，请稍后重试")
+            logger.debug("3. 代理设置问题，请检查代理配置")
             return None
         except openai.APITimeoutError as te:
-            print(f"=== API超时错误 ===")
-            print(f"生成单股分析失败: {str(te)}")
-            print("请求超时，请稍后重试")
+            logger.debug(f"=== API超时错误 ===")
+            logger.debug(f"生成单股分析失败: {str(te)}")
+            logger.debug("请求超时，请稍后重试")
             return None
         except openai.RateLimitError as re:
-            print(f"=== API频率限制错误 ===")
-            print(f"生成单股分析失败: {str(re)}")
-            print("API调用频率过高，请稍后重试")
+            logger.debug(f"=== API频率限制错误 ===")
+            logger.debug(f"生成单股分析失败: {str(re)}")
+            logger.debug("API调用频率过高，请稍后重试")
             return None
         except openai.APIError as ae:
-            print(f"=== API错误 ===")
-            print(f"生成单股分析失败: {str(ae)}")
-            print(f"错误类型: {type(ae)}")
+            logger.debug(f"=== API错误 ===")
+            logger.debug(f"生成单股分析失败: {str(ae)}")
+            logger.debug(f"错误类型: {type(ae)}")
             return None
         except Exception as e:
-            print(f"=== 未预期的错误 ===")
-            print(f"生成单股分析失败: {str(e)}")
-            print(f"错误类型: {type(e)}")
+            logger.debug(f"=== 未预期的错误 ===")
+            logger.debug(f"生成单股分析失败: {str(e)}")
+            logger.debug(f"错误类型: {type(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -1133,7 +1136,7 @@ class LLMAnalyzer:
         """
         try:
             insight_type = market_data['insight_type']
-            print(f"开始生成市场洞察: {insight_type}")
+            logger.debug(f"开始生成市场洞察: {insight_type}")
             
             # 构建市场洞察数据
             market_info = f"市场洞察分析 - {insight_type}：\n\n"
@@ -1214,7 +1217,7 @@ class LLMAnalyzer:
                 {"role": "user", "content": market_info}
             ]
             
-            print("发送市场洞察分析请求...")
+            logger.debug("发送市场洞察分析请求...")
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -1224,12 +1227,12 @@ class LLMAnalyzer:
             
             if response.choices and response.choices[0].message:
                 analysis_text = response.choices[0].message.content.strip()
-                print("市场洞察分析生成成功")
+                logger.debug("市场洞察分析生成成功")
                 return analysis_text
             else:
-                print("市场洞察分析响应为空")
+                logger.debug("市场洞察分析响应为空")
                 return None
                 
         except Exception as e:
-            print(f"生成市场洞察失败: {str(e)}")
+            logger.debug(f"生成市场洞察失败: {str(e)}")
             return None

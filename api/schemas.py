@@ -122,6 +122,16 @@ class HotspotRelatedStock(BaseModel):
     reason: str
 
 
+class HotspotHeatBreakdown(BaseModel):
+    trading_activity: float = 0
+    discussion_heat: float = 0
+    news_heat: float = 0
+    alert_count: int = 0
+    rank_hits: int = 0
+    attention_level: Literal["focus", "caution", "watch"] = "watch"
+    basis: List[str] = Field(default_factory=list)
+
+
 class HotspotItem(BaseModel):
     topic_name: str
     heat_score: float
@@ -130,6 +140,7 @@ class HotspotItem(BaseModel):
     trend_direction: Literal["up", "down", "flat"] = "flat"
     ai_summary: Optional[str] = None
     source: str = "derived"
+    heat_breakdown: HotspotHeatBreakdown = Field(default_factory=HotspotHeatBreakdown)
 
 
 class HotspotHistoryPoint(BaseModel):
@@ -270,6 +281,7 @@ class StrategyHoldingAnalysis(BaseModel):
     action_reason: str = ""
     trigger_hits: List[str] = Field(default_factory=list)
     alerts: List[str] = Field(default_factory=list)
+    analysis_status: Literal["live", "cached", "degraded", "local"] = "live"
 
 
 class StrategyTodoItem(BaseModel):

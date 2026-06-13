@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DemoAccessGate } from "@/components/demo-access-gate";
 import { useDemoAccess } from "@/components/demo-access-provider";
@@ -130,12 +131,11 @@ export function NewsPageClient() {
 
   const refreshPage = useCallback(() => {
     setManualRefreshing(true);
-    const cleanup = loadNews();
+    loadNews();
     if (unlocked) {
       loadAgent();
     }
     window.setTimeout(() => {
-      cleanup();
       setManualRefreshing(false);
     }, 400);
   }, [loadAgent, loadNews, unlocked]);
@@ -347,7 +347,7 @@ export function NewsPageClient() {
                 <div className="section-kicker">Lead Story</div>
                 <h2>全球重点新闻</h2>
               </div>
-              <span className="muted">{globalNews.length ? `${globalNews.length} 条` : "暂无数据"}</span>
+              <span className="muted">{globalNews.length ? `${globalNews.length} 条` : "新闻源为空"}</span>
             </div>
 
             {leadNews ? (
@@ -379,7 +379,19 @@ export function NewsPageClient() {
                 </div>
               </article>
             ) : (
-              <p className="muted">当前没有可展示的全球新闻。</p>
+              <div className="news-empty-state">
+                <p className="muted">
+                  当前外部新闻源没有返回可展示内容，可能是数据源限流、网络波动，或本地监控缓存暂时为空。
+                </p>
+                <div className="inline-actions">
+                  <button className="button ghost" type="button" onClick={loadNews}>
+                    重新加载
+                  </button>
+                  <Link href="/hotspots" className="button">
+                    先看热点板块
+                  </Link>
+                </div>
+              </div>
             )}
 
             {secondaryNews.length ? (

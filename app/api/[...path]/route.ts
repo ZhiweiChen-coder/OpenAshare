@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 function isPublicCacheableGet(path: string[], searchParams: URLSearchParams) {
   if (path.length === 2 && path[0] === "stocks" && path[1] === "search") {
-    return !searchParams.has("request_id");
+    return false;
   }
   if (path.length === 3 && path[0] === "stocks" && path[2] === "analysis") {
     return searchParams.get("include_ai") === "false";

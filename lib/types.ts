@@ -108,6 +108,15 @@ export type HotspotItem = {
   trend_direction: "up" | "down" | "flat";
   ai_summary?: string | null;
   source: string;
+  heat_breakdown: {
+    trading_activity: number;
+    discussion_heat: number;
+    news_heat: number;
+    alert_count: number;
+    rank_hits: number;
+    attention_level: "focus" | "caution" | "watch";
+    basis: string[];
+  };
   related_stocks: Array<{
     stock_name: string;
     stock_code: string;
@@ -252,6 +261,7 @@ export type StrategyHoldingAnalysis = {
   action_reason: string;
   trigger_hits: string[];
   alerts: string[];
+  analysis_status: "live" | "cached" | "degraded" | "local";
 };
 
 export type StrategyTodoItem = {

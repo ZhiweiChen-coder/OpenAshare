@@ -12,6 +12,8 @@ import {
   getClientErrorMessage,
   getMarketRegime,
   getStrategyHoldingsAnalysis,
+  listStrategyHoldings,
+  refreshStrategyHoldings,
   searchStocks,
   updateStrategyHolding,
 } from "@/lib/api";
@@ -100,6 +102,8 @@ const EMPTY_STRATEGY_FORM: StrategyFormState = {
   status: "planned",
 };
 
+const STRATEGY_ANALYSIS_CACHE_KEY = "ashare.strategyAnalysis.v1";
+
 const HOLDING_STATUS_GROUPS: Array<{
   key: StrategyFormState["status"];
   title: string;
@@ -126,13 +130,16 @@ export function PortfolioShell({
   const [marketRegimeLoading, setMarketRegimeLoading] = useState(initialMarketRegime === null);
   const [marketRegimeError, setMarketRegimeError] = useState<string | null>(null);
   const [strategyForm, setStrategyForm] = useState<StrategyFormState>(EMPTY_STRATEGY_FORM);
+  const [strategyFormOpen, setStrategyFormOpen] = useState(Boolean(initialPrefill?.stock_code || initialPrefill?.stock_name));
   const [message, setMessage] = useState("可直接录入策略持股，随后刷新查看最新分析。");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([]);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [isAnalysisRefreshing, setIsAnalysisRefreshing] = useState(false);
   const strategyPriceInputRef = useRef<HTMLInputElement | null>(null);
+  const strategyAnalysisRef = useRef(normalizeStrategyAnalysis(initialStrategyAnalysis));
   const initialLoadInFlightRef = useRef(false);
+  const initialLoadCompletedRef = useRef(false);
   const localMutationVersionRef = useRef(0);
   const [focusTarget, setFocusTarget] = useState<"strategy_price" | null>(null);
   const [lastSubmitted, setLastSubmitted] = useState<{ stock_code: string; stock_name: string } | null>(null);
@@ -140,8 +147,21 @@ export function PortfolioShell({
   const isBusy = pendingAction !== null;
   const safeStrategyAnalysis = normalizeStrategyAnalysis(strategyAnalysis);
   const strategyRefreshInProgress = pendingAction?.type === "refresh" || isAnalysisRefreshing;
+  const scoredStrategyHoldingCount = safeStrategyAnalysis.holdings.filter(hasStrategyScore).length;
+
+  function applyStrategyAnalysis(analysis: StrategyHoldingAnalysisResponse) {
+    const normalized = normalizeStrategyAnalysis(analysis);
+    const merged = mergeLatestAnalysisWithExisting(normalized, strategyAnalysisRef.current);
+    strategyAnalysisRef.current = merged;
+    setStrategyAnalysis(merged);
+    setStrategyHoldings(toHoldingList(merged));
+    if (merged.holdings.some(hasStrategyScore)) {
+      cacheStrategyAnalysis(merged);
+    }
+  }
 
   function fillStrategyForm(holding: StrategyHolding) {
+    setStrategyFormOpen(true);
     setStrategyForm({
       id: holding.id,
       strategy_key: holding.strategy_key,
@@ -166,6 +186,7 @@ export function PortfolioShell({
 
   function resetStrategyForm() {
     setStrategyForm(EMPTY_STRATEGY_FORM);
+    setStrategyFormOpen(false);
   }
 
   function markLocalMutation() {
@@ -181,10 +202,24 @@ export function PortfolioShell({
   }, [focusTarget]);
 
   useEffect(() => {
+    strategyAnalysisRef.current = safeStrategyAnalysis;
+  }, [safeStrategyAnalysis]);
+
+  useEffect(() => {
+    const cachedAnalysis = readCachedStrategyAnalysis();
+    if (!cachedAnalysis?.holdings.length) {
+      return;
+    }
+    setStrategyAnalysis((prev) => (normalizeStrategyAnalysis(prev).holdings.length ? prev : cachedAnalysis));
+    setStrategyHoldings((prev) => (prev.length ? prev : toHoldingList(cachedAnalysis)));
+  }, []);
+
+  useEffect(() => {
     if (!initialPrefill?.stock_code && !initialPrefill?.stock_name) {
       return;
     }
     setSearchQuery(prefillLabel);
+    setStrategyFormOpen(true);
     setStrategyForm((prev) => ({
       ...prev,
       id: undefined,
@@ -207,7 +242,7 @@ export function PortfolioShell({
   }, [initialPrefill, prefillLabel]);
 
   useEffect(() => {
-    if (!loaded || !unlocked || initialLoadInFlightRef.current) {
+    if (!loaded || !unlocked || initialLoadInFlightRef.current || initialLoadCompletedRef.current) {
       return;
     }
     if (safeStrategyAnalysis.holdings.length && marketRegime) {
@@ -218,6 +253,20 @@ export function PortfolioShell({
     setIsAnalysisRefreshing(true);
     setMarketRegimeLoading(true);
     setMarketRegimeError(null);
+    void listStrategyHoldings()
+      .then((holdings) => {
+        if (localMutationVersionRef.current !== requestMutationVersion) {
+          return;
+        }
+        setStrategyHoldings(holdings);
+        setStrategyAnalysis((prev) => {
+          const normalizedPrev = normalizeStrategyAnalysis(prev);
+          return mergeHoldingsWithExistingAnalysis(holdings, normalizedPrev);
+        });
+      })
+      .catch(() => {
+        // Full analysis below still has a chance to hydrate the page.
+      });
     void Promise.allSettled([
       getStrategyHoldingsAnalysis(),
       getMarketRegime(),
@@ -226,8 +275,7 @@ export function PortfolioShell({
         if (analysisResult.status === "fulfilled") {
           if (localMutationVersionRef.current === requestMutationVersion) {
             const analysis = normalizeStrategyAnalysis(analysisResult.value);
-            setStrategyAnalysis(analysis);
-            setStrategyHoldings(toHoldingList(analysis));
+            applyStrategyAnalysis(analysis);
           }
         }
         if (marketRegimeResult.status === "fulfilled") {
@@ -242,6 +290,7 @@ export function PortfolioShell({
         }
       })
       .finally(() => {
+        initialLoadCompletedRef.current = true;
         initialLoadInFlightRef.current = false;
         setIsAnalysisRefreshing(false);
         setMarketRegimeLoading(false);
@@ -251,6 +300,7 @@ export function PortfolioShell({
   function applySearchResult(item: StockSearchResult) {
     setSearchQuery(item.name);
     setSearchResults([]);
+    setStrategyFormOpen(true);
     setStrategyForm((prev) => ({
       ...prev,
       id: undefined,
@@ -263,6 +313,23 @@ export function PortfolioShell({
 
   function toHoldingList(analysis: StrategyHoldingAnalysisResponse) {
     return normalizeStrategyAnalysis(analysis).holdings.map((item) => item.holding);
+  }
+
+  function mergeHoldingsWithExistingAnalysis(
+    holdings: StrategyHolding[],
+    existingAnalysis: StrategyHoldingAnalysisResponse,
+  ) {
+    const existingById = new Map(
+      existingAnalysis.holdings
+        .filter((item) => item.holding.id != null)
+        .map((item) => [item.holding.id, item]),
+    );
+    const existingByCode = new Map(
+      existingAnalysis.holdings.map((item) => [item.holding.stock_code, item]),
+    );
+    return recalculateAnalysisSummary(
+      holdings.map((holding) => buildLocalHoldingAnalysis(holding, existingById.get(holding.id) ?? existingByCode.get(holding.stock_code))),
+    );
   }
 
   function recalculateAnalysisSummary(holdings: StrategyHoldingAnalysisResponse["holdings"]): StrategyHoldingAnalysisResponse {
@@ -305,22 +372,6 @@ export function PortfolioShell({
     };
   }
 
-  async function refreshStrategyAnalysis(options?: { successMessage?: string; errorPrefix?: string }) {
-    setIsAnalysisRefreshing(true);
-    try {
-      const latest = await getStrategyHoldingsAnalysis();
-      setStrategyAnalysis(normalizeStrategyAnalysis(latest));
-      setStrategyHoldings(toHoldingList(latest));
-      if (options?.successMessage) {
-        setMessage(options.successMessage);
-      }
-    } catch (error) {
-      setMessage(`${options?.errorPrefix ?? "刷新失败"}: ${getClientErrorMessage(error)}`);
-    } finally {
-      setIsAnalysisRefreshing(false);
-    }
-  }
-
   function syncHoldingInAnalysis(updatedHolding: StrategyHolding) {
     setStrategyAnalysis((prev) => {
       const existing = prev.holdings.find((item) => item.holding.id === updatedHolding.id);
@@ -354,7 +405,14 @@ export function PortfolioShell({
       try {
         const results = await searchStocks(searchQuery.trim());
         setSearchResults(results);
-        setMessage(results.length ? `找到 ${results.length} 条匹配结果。` : "没有找到匹配股票。");
+        const exactResult = results.find((item) => item.match_type === "exact_name" || item.match_type === "exact_code");
+        const resultToApply = results.length === 1 ? results[0] : exactResult;
+        if (resultToApply) {
+          applySearchResult(resultToApply);
+          setMessage(`已找到并带入 ${resultToApply.name} (${resultToApply.code})。`);
+        } else {
+          setMessage(results.length ? `找到 ${results.length} 条匹配结果，请选择一只填入表单。` : "没有找到匹配股票。");
+        }
       } catch (error) {
         setMessage(`搜索失败: ${getClientErrorMessage(error)}`);
       } finally {
@@ -460,13 +518,11 @@ export function PortfolioShell({
     void (async () => {
       try {
         const [latestResult, marketRegimeResult] = await Promise.allSettled([
-          getStrategyHoldingsAnalysis(),
+          refreshStrategyHoldings(),
           getMarketRegime(),
         ]);
         if (latestResult.status === "fulfilled") {
-          const latest = normalizeStrategyAnalysis(latestResult.value);
-          setStrategyAnalysis(latest);
-          setStrategyHoldings(toHoldingList(latest));
+          applyStrategyAnalysis(latestResult.value);
         } else {
           throw latestResult.reason;
         }
@@ -647,6 +703,44 @@ export function PortfolioShell({
       <section className="content-grid">
         <div className="panel section">
           <h2>策略总览</h2>
+          <div className="portfolio-action-strip">
+            <div>
+              <span className="portfolio-action-kicker">今日优先</span>
+              <strong>
+                {safeStrategyAnalysis.todo_items.length
+                  ? `${safeStrategyAnalysis.todo_items[0].stock_name} · ${safeStrategyAnalysis.todo_items[0].action_label}`
+                  : "暂无必须处理动作"}
+              </strong>
+              <p className="muted">
+                {safeStrategyAnalysis.todo_items.length
+                  ? safeStrategyAnalysis.todo_items[0].action_reason
+                  : "可以先保持观察，或刷新策略持股获取最新判断。"}
+              </p>
+            </div>
+            <div className="portfolio-action-list">
+              {safeStrategyAnalysis.todo_items.slice(0, 2).map((item) => (
+                <Link
+                  href={`#holding-${item.stock_code}`}
+                  className="portfolio-action-chip"
+                  key={`${item.holding_id}-${item.stock_code}-${item.action_label}`}
+                >
+                  <span>{item.stock_name}</span>
+                  <strong>{item.action_label}</strong>
+                </Link>
+              ))}
+              {!safeStrategyAnalysis.todo_items.length ? (
+                <button
+                  className="portfolio-action-chip"
+                  type="button"
+                  onClick={onRefreshStrategyAnalysis}
+                  disabled={isBusy || isAnalysisRefreshing}
+                >
+                  <span>策略模型</span>
+                  <strong>{strategyRefreshInProgress ? "刷新中" : "刷新一次"}</strong>
+                </button>
+              ) : null}
+            </div>
+          </div>
           <div className="metric-grid">
             <div className="card">
               <div className="muted">策略持股总成本</div>
@@ -694,6 +788,23 @@ export function PortfolioShell({
         </div>
 
         <div className="panel section">
+          <div className="news-section-head">
+            <div>
+              <div className="section-kicker">Strategy Entry</div>
+              <h2>{strategyForm.id ? "编辑策略持股" : "新增策略持股"}</h2>
+            </div>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => setStrategyFormOpen((current) => !current)}
+              aria-expanded={strategyFormOpen}
+            >
+              {strategyFormOpen ? "收起" : "展开录入"}
+            </button>
+          </div>
+
+          {strategyFormOpen ? (
+            <>
           <form className="stack" onSubmit={onSearch}>
             <label className="label">
               搜索股票（可选，带入下方表单）
@@ -732,7 +843,6 @@ export function PortfolioShell({
 
           <form className="stack" onSubmit={onSubmitStrategy} style={{ marginTop: 18 }}>
             <div>
-              <h2 style={{ marginBottom: 6 }}>{strategyForm.id ? "编辑策略持股" : "新增策略持股"}</h2>
               <p className="muted" style={{ fontSize: 13, margin: 0 }}>
                 {strategyForm.id
                   ? "改完点保存；计划细节在下方折叠里。"
@@ -969,6 +1079,15 @@ export function PortfolioShell({
               </button>
             </div>
           </form>
+            </>
+          ) : (
+            <div className="portfolio-entry-compact">
+              <p className="muted">日常复盘先看下方持仓动作；需要新增、编辑或从搜索带入股票时再展开。</p>
+              <button className="button" type="button" onClick={() => setStrategyFormOpen(true)}>
+                添加/记录新标的
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -1057,7 +1176,7 @@ export function PortfolioShell({
               </div>
               <div className="card">
                 <div className="muted">平均策略分</div>
-                <strong>{safeStrategyAnalysis.average_score.toFixed(2)}</strong>
+                <strong>{scoredStrategyHoldingCount ? safeStrategyAnalysis.average_score.toFixed(2) : "待刷新"}</strong>
               </div>
             </div>
             <div className="stack" style={{ gap: 18 }}>
@@ -1072,9 +1191,13 @@ export function PortfolioShell({
                       <h3>{group.title}</h3>
                       <p className="muted">{group.description}</p>
                     </div>
-                    <div className="position-grid portfolio-holding-grid">
+                    <div className="position-grid portfolio-holding-grid" data-layout={holdingGridLayout(items.length)}>
                       {items.map((item) => (
-                        <div className="card portfolio-holding-card" key={`${item.holding.id}-${item.holding.stock_code}`}>
+                        <div
+                          className="card portfolio-holding-card"
+                          id={`holding-${item.holding.stock_code}`}
+                          key={`${item.holding.id}-${item.holding.stock_code}`}
+                        >
                           <h3>{item.holding.stock_name} ({item.holding.stock_code})</h3>
                           <p className="muted">
                             {item.holding.strategy_key} · 计划价/成本 {item.holding.entry_price.toFixed(2)} · 数量 {item.holding.quantity}
@@ -1090,7 +1213,7 @@ export function PortfolioShell({
                             </div>
                             <div className="card portfolio-key-metric">
                               <div className="muted portfolio-key-metric-label">总分</div>
-                              <strong>{item.strategy_score.total.toFixed(1)}</strong>
+                              <strong>{hasStrategyScore(item) ? item.strategy_score.total.toFixed(1) : "待刷新"}</strong>
                             </div>
                             <div className="card portfolio-key-metric">
                               <div className="muted portfolio-key-metric-label">状态</div>
@@ -1125,12 +1248,12 @@ export function PortfolioShell({
                                 <div key={`${item.holding.id}-${label}`} className="portfolio-canslim-item">
                                   <div className="portfolio-canslim-item-head">
                                     <span>{label}</span>
-                                    <span>{score.toFixed(0)}</span>
+                                    <span>{hasStrategyScore(item) ? score.toFixed(0) : "-"}</span>
                                   </div>
                                   <div className="portfolio-canslim-track">
                                     <div
                                       style={{
-                                        width: `${Math.max(0, Math.min(100, score))}%`,
+                                        width: hasStrategyScore(item) ? `${Math.max(0, Math.min(100, score))}%` : "0%",
                                         height: "100%",
                                         background: scoreTone(score),
                                       }}
@@ -1284,6 +1407,12 @@ function statusLabel(status: StrategyHolding["status"]) {
   return "已失效";
 }
 
+function holdingGridLayout(count: number) {
+  if (count <= 1) return "single";
+  if (count === 2) return "pair";
+  return "many";
+}
+
 function buildTodoItems(holdings: StrategyHoldingAnalysisResponse["holdings"]) {
   return holdings
     .map((item) => ({
@@ -1342,10 +1471,106 @@ function normalizeStrategyAnalysis(
           action_label: item?.action_label ?? "继续持有",
           action_reason: item?.action_reason ?? "",
           invalidation_reason: item?.invalidation_reason ?? null,
+          analysis_status: normalizeAnalysisStatus(item),
         }))
       : [],
     todo_items: Array.isArray(analysis.todo_items) ? analysis.todo_items : [],
     review_items: Array.isArray(analysis.review_items) ? analysis.review_items : [],
+  };
+}
+
+function normalizeAnalysisStatus(item: Partial<StrategyHoldingAnalysis> | undefined): StrategyHoldingAnalysis["analysis_status"] {
+  const status = item?.analysis_status;
+  if (status === "live" || status === "cached" || status === "degraded" || status === "local") {
+    return status;
+  }
+  return (item?.strategy_score?.total ?? 0) > 0 ? "cached" : "local";
+}
+
+function readCachedStrategyAnalysis(): StrategyHoldingAnalysisResponse | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(STRATEGY_ANALYSIS_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+    return normalizeStrategyAnalysis(JSON.parse(raw) as StrategyHoldingAnalysisResponse);
+  } catch {
+    return null;
+  }
+}
+
+function cacheStrategyAnalysis(analysis: StrategyHoldingAnalysisResponse) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(STRATEGY_ANALYSIS_CACHE_KEY, JSON.stringify(normalizeStrategyAnalysis(analysis)));
+  } catch {
+    // Ignore storage quota or private mode failures; the live analysis is still displayed.
+  }
+}
+
+function mergeLatestAnalysisWithExisting(
+  latest: StrategyHoldingAnalysisResponse,
+  existing: StrategyHoldingAnalysisResponse,
+) {
+  const existingById = new Map(
+    existing.holdings
+      .filter((item) => item.holding.id != null)
+      .map((item) => [item.holding.id, item]),
+  );
+  const existingByCode = new Map(existing.holdings.map((item) => [item.holding.stock_code, item]));
+  const mergedHoldings = latest.holdings.map((item) => {
+    if (hasStrategyScore(item)) {
+      return item;
+    }
+    const previous = existingById.get(item.holding.id) ?? existingByCode.get(item.holding.stock_code);
+    return previous && hasStrategyScore(previous) ? buildLocalHoldingAnalysis(item.holding, previous) : item;
+  });
+  return recalculateStrategyAnalysis(latest, mergedHoldings);
+}
+
+function recalculateStrategyAnalysis(
+  base: StrategyHoldingAnalysisResponse,
+  holdings: StrategyHoldingAnalysisResponse["holdings"],
+): StrategyHoldingAnalysisResponse {
+  const investedHoldings = holdings.filter((item) => item.holding.status !== "watching" && item.holding.status !== "planned");
+  const total_cost = investedHoldings.reduce((sum, item) => sum + item.holding.entry_price * item.holding.quantity, 0);
+  const total_market_value = investedHoldings.reduce((sum, item) => sum + item.market_value, 0);
+  const total_realized_pnl = investedHoldings.reduce((sum, item) => sum + item.realized_pnl, 0);
+  const active_count = holdings.filter((item) => item.holding.status === "holding" || item.holding.status === "weakening").length;
+  const watching_count = holdings.filter((item) => item.holding.status === "watching").length;
+  const planned_count = holdings.filter((item) => item.holding.status === "planned").length;
+  const weakening_count = holdings.filter((item) => item.holding.status === "weakening").length;
+  const exited_count = holdings.filter((item) => item.holding.status === "exited").length;
+  const invalidated_count = holdings.filter((item) => item.holding.status === "invalidated").length;
+  const scoredHoldings = holdings.filter(hasStrategyScore);
+  const total_pnl = total_market_value - total_cost;
+  const exited_win_count = holdings.filter((item) => item.holding.status === "exited" && item.realized_pnl > 0).length;
+  return {
+    ...base,
+    total_cost,
+    total_market_value,
+    total_pnl,
+    total_pnl_pct: total_cost ? (total_pnl / total_cost) * 100 : 0,
+    total_realized_pnl,
+    holding_count: holdings.length,
+    active_count,
+    watching_count,
+    planned_count,
+    weakening_count,
+    exited_count,
+    invalidated_count,
+    win_rate_pct: exited_count ? (exited_win_count / exited_count) * 100 : 0,
+    average_score: scoredHoldings.length
+      ? scoredHoldings.reduce((sum, item) => sum + item.strategy_score.total, 0) / scoredHoldings.length
+      : 0,
+    todo_items: buildTodoItems(holdings),
+    review_items: buildReviewItems(holdings),
+    holdings,
   };
 }
 
@@ -1391,6 +1616,7 @@ function buildLocalHoldingAnalysis(
     trigger_hits: existing?.trigger_hits ?? [],
     alerts:
       existing?.alerts ?? ["当前展示的是本地记录快照，最新评分与盈亏请手动刷新。"],
+    analysis_status: existing && hasStrategyScore(existing) ? "cached" : "local",
   };
 }
 
@@ -1409,8 +1635,15 @@ function scoreTone(score: number) {
   return "linear-gradient(90deg, #ef4444, #f87171)";
 }
 
+function hasStrategyScore(item: StrategyHoldingAnalysis) {
+  return item.strategy_score.total > 0 && (item.analysis_status === "live" || item.analysis_status === "cached");
+}
+
 function buildRiskNotes(item: StrategyHoldingAnalysis) {
   const notes: string[] = [];
+  if (!hasStrategyScore(item)) {
+    return (item.alerts.length ? item.alerts : [item.action_reason || "已显示本地记录，等待最新评分刷新。"]).slice(0, 2);
+  }
   const lowFactors = ([
     ["C", item.strategy_score.c],
     ["A", item.strategy_score.a],
