@@ -6,6 +6,7 @@ import { DemoAccessDialog } from "@/components/demo-access-dialog";
 import { DemoAccessProvider } from "@/components/demo-access-provider";
 import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
 import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
+import "./tokens.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

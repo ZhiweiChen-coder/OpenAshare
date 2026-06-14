@@ -2050,9 +2050,38 @@ textarea.input {
 .research-pulse-head,
 .research-pulse p,
 .research-pulse-track,
-.research-pulse-tasks {
+.research-pulse-tasks,
+.research-pulse .portfolio-snapshot-action,
+.research-pulse .metric-grid,
+.research-pulse .today-desk-divider,
+.research-pulse .demo-access-gate {
   position: relative;
   z-index: 1;
+}
+
+/* 今日盘面：节奏区与组合数据区之间的细分隔 */
+.today-desk-divider {
+  margin: 20px 0 0;
+  border: none;
+  border-top: 1px solid rgba(19, 19, 19, 0.1);
+}
+.research-pulse .portfolio-snapshot-action {
+  margin-top: 18px;
+}
+/* 今日盘面指标固定 2×2，避免窄列竖排把面板拉高 */
+.research-pulse .metric-grid {
+  margin-top: 14px;
+  grid-template-columns: 1fr 1fr;
+}
+.research-pulse .metric-grid .card {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(19, 19, 19, 0.07);
+}
+.research-pulse .metric-grid .card strong {
+  font-family: var(--font-numeric);
+  font-size: 1.12rem;
+  letter-spacing: -0.01em;
 }
 .research-pulse-head {
   display: flex;
@@ -2202,10 +2231,14 @@ textarea.input {
 }
 .hotspot-rank {
   color: rgba(19, 19, 19, 0.22);
+  font-family: var(--font-numeric);
   font-size: 1.45rem;
   font-weight: 900;
   letter-spacing: -0.08em;
   line-height: 1;
+}
+.hotspot-card .pill {
+  font-variant-numeric: tabular-nums;
 }
 
 .section-head-row {
@@ -2551,6 +2584,252 @@ textarea.input {
   border: none;
   border-radius: 0;
 }
+
+/* AI「思考中」状态：发出请求到第一个字之间的等待动画 */
+.ai-thinking {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(15, 138, 123, 0.08), rgba(176, 68, 47, 0.06)), #fbfaf7;
+  overflow: hidden;
+}
+.ai-thinking-orb {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 30%, #54c2b1, var(--accent));
+  box-shadow: 0 0 0 0 rgba(15, 138, 123, 0.4);
+  animation: ai-thinking-orb-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ai-thinking-orb-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(15, 138, 123, 0.4);
+    transform: scale(1);
+  }
+  60% {
+    box-shadow: 0 0 0 12px rgba(15, 138, 123, 0);
+    transform: scale(1.06);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(15, 138, 123, 0);
+    transform: scale(1);
+  }
+}
+.ai-thinking-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.ai-thinking-title {
+  display: inline-flex;
+  align-items: center;
+  font-size: 1rem;
+  color: var(--ink);
+}
+.ai-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: 0.12em;
+}
+.ai-thinking-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: analysis-dot-rise 1.15s ease-in-out infinite;
+}
+.ai-thinking-dots i:nth-child(2) {
+  animation-delay: 0.14s;
+}
+.ai-thinking-dots i:nth-child(3) {
+  animation-delay: 0.28s;
+}
+.ai-thinking-step {
+  font-size: 0.86rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ai-thinking-shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.55) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: ai-thinking-shimmer-sweep 1.8s ease-in-out infinite;
+}
+@keyframes ai-thinking-shimmer-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-thinking-orb,
+  .ai-thinking-dots i,
+  .ai-thinking-shimmer {
+    animation: none;
+  }
+}
+
+/* AI 流式生成状态条 */
+.ai-stream-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgba(15, 138, 123, 0.08), rgba(176, 68, 47, 0.05)), #fbfaf7;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.ai-stream-message {
+  flex: 1;
+  min-width: 0;
+}
+.ai-stream-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--accent);
+}
+.ai-stream-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(15, 138, 123, 0.45);
+  animation: ai-stream-pulse 1.4s ease-out infinite;
+}
+@keyframes ai-stream-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(15, 138, 123, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(15, 138, 123, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(15, 138, 123, 0);
+  }
+}
+
+/* 干净的单栏 markdown 阅读文档（react-markdown 渲染） */
+.ai-report-md {
+  color: var(--ink);
+  font-size: 0.98rem;
+  line-height: 1.85;
+  word-break: break-word;
+}
+.ai-report-md > :first-child {
+  margin-top: 0;
+}
+.ai-report-md > :last-child {
+  margin-bottom: 0;
+}
+.ai-report-md h1,
+.ai-report-md h2,
+.ai-report-md h3,
+.ai-report-md h4 {
+  margin: 1.5em 0 0.6em;
+  line-height: 1.4;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+.ai-report-md h1 {
+  font-size: 1.32rem;
+}
+.ai-report-md h2 {
+  font-size: 1.16rem;
+  padding-bottom: 0.4em;
+  border-bottom: 1px solid var(--line);
+}
+.ai-report-md h3 {
+  font-size: 1.04rem;
+}
+.ai-report-md h4 {
+  font-size: 0.98rem;
+  color: var(--muted);
+}
+.ai-report-md p {
+  margin: 0 0 0.85em;
+  color: #33302d;
+}
+.ai-report-md ul,
+.ai-report-md ol {
+  margin: 0 0 0.95em;
+  padding-left: 1.5em;
+}
+.ai-report-md li {
+  margin: 0.32em 0;
+  color: #33302d;
+}
+.ai-report-md li::marker {
+  color: var(--accent);
+}
+.ai-report-md strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+.ai-report-md a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ai-report-md blockquote {
+  margin: 0.95em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--accent);
+  background: #fbfaf7;
+  color: #4a4540;
+}
+.ai-report-md code {
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  background: rgba(19, 19, 19, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.ai-report-md pre {
+  margin: 0.95em 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(19, 19, 19, 0.04);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+.ai-report-md pre code {
+  padding: 0;
+  background: none;
+}
+.ai-report-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.95em 0;
+  font-size: 0.92rem;
+}
+.ai-report-md th,
+.ai-report-md td {
+  border: 1px solid var(--line);
+  padding: 8px 11px;
+  text-align: left;
+  vertical-align: top;
+}
+.ai-report-md th {
+  background: #f4f1eb;
+  font-weight: 700;
+}
+.ai-report-md hr {
+  margin: 1.4em 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
 .ai-report {
   width: 100%;
   display: grid;
@@ -2825,8 +3104,8 @@ textarea.input {
 }
 .tag-list button.tag { cursor: pointer; border: none; }
 .tag-list button.tag:hover { background: rgba(190, 91, 54, 0.18); }
-.signal-up { color: var(--accent); }
-.signal-down { color: #b02f2f; }
+.signal-up { color: var(--color-up); font-variant-numeric: tabular-nums; }
+.signal-down { color: var(--color-down); font-variant-numeric: tabular-nums; }
 .stack { display: grid; gap: 16px; }
 .chat-log {
   display: grid;
@@ -3738,6 +4017,21 @@ textarea.input {
   line-height: 1.65;
 }
 
+/* 今日判断 ⊕ 全球热点主题 合并：Topics 作为摘要面板内的子区块 */
+.summary-topics {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(19, 19, 19, 0.1);
+}
+.summary-topics-head h3 {
+  margin: 4px 0 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+.summary-topics .topic-strip-grid {
+  margin-top: 12px;
+}
+
 .story-row {
   padding: 16px 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
@@ -4369,6 +4663,73 @@ textarea.input {
   min-height: 34px;
   padding: 7px 11px;
   font-size: 0.82rem;
+}
+
+/* ---- /stocks 数据呈现精修（scope: .stocks-page） ---------------- */
+.stocks-page .metric-grid .card strong {
+  font-family: var(--font-numeric);
+  font-size: 1.18rem;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.stocks-focus-metrics strong {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+.stocks-focus-change {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--font-numeric);
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stocks-focus-change.signal-up {
+  background: color-mix(in srgb, var(--color-up) 14%, transparent);
+}
+.stocks-focus-change.signal-down {
+  background: color-mix(in srgb, var(--color-down) 14%, transparent);
+}
+
+/* ---- /portfolio 数据呈现精修（scope: .portfolio-page） ---------- */
+.portfolio-page .metric-grid .card strong {
+  font-family: var(--font-numeric);
+  font-size: 1.18rem;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+/* 市场状态横幅：指数涨跌幅统一等宽数字 */
+.market-regime-index-grid .signal-up,
+.market-regime-index-grid .signal-down {
+  font-family: var(--font-numeric);
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+/* ---- /hotspots 数据呈现精修（scope: .hotspots-page） ------------ */
+.hotspots-page .hotspot-metric strong,
+.hotspots-page .hotspot-heat-pill strong,
+.hotspots-page .metric-grid .card strong,
+.hotspots-page .strategy-slide-rank {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* ---- /settings 生效信息：技术值用等宽（scope: .settings-page） -- */
+.settings-page .news-grid .card strong {
+  font-family: var(--font-numeric);
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+/* ---- Agent 侧栏：回复卡片数值用等宽（scope: .agent-chat-compact） */
+.agent-chat-compact .agent-card-metric strong {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .stocks-tech-grid {

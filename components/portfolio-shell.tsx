@@ -692,7 +692,7 @@ export function PortfolioShell({
   }
 
   return (
-    <div className="stack">
+    <div className="stack portfolio-page">
       <MarketRegimeBanner
         marketRegime={marketRegime}
         compact

@@ -244,6 +244,92 @@ export function getStockAnalysis(
   });
 }
 
+export type StockAnalysisStreamStage = {
+  stage: string;
+  progress_pct: number;
+  message?: string | null;
+};
+
+export type StockAnalysisStreamHandlers = {
+  onStage?: (stage: StockAnalysisStreamStage) => void;
+  onToken?: (delta: string) => void;
+  onResult?: (payload: StockAnalysisResponse) => void;
+  onError?: (message: string) => void;
+  signal?: AbortSignal;
+};
+
+/**
+ * 流式单股分析：通过 SSE 实时接收处理步骤与逐字生成的 AI 文本。
+ * 事件类型：start / progress / token / result / error / done。
+ */
+export async function streamStockAnalysis(
+  code: string,
+  handlers: StockAnalysisStreamHandlers,
+): Promise<void> {
+  const response = await fetch(
+    `/api/stocks/${encodeURIComponent(code)}/analysis/stream?include_ai=true`,
+    { headers: { Accept: "text/event-stream" }, cache: "no-store", signal: handlers.signal },
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`流式分析请求失败（${response.status}）`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) >= 0) {
+      const rawEvent = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+
+      let eventName = "";
+      let dataStr = "";
+      for (const line of rawEvent.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+      }
+      if (!dataStr) continue;
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(dataStr);
+      } catch {
+        continue;
+      }
+
+      switch (eventName) {
+        case "start":
+        case "progress":
+          handlers.onStage?.({
+            stage: String(payload.stage ?? ""),
+            progress_pct: Number(payload.progress_pct ?? 0),
+            message: (payload.message as string | null) ?? null,
+          });
+          break;
+        case "token": {
+          const meta = (payload.meta ?? {}) as { delta?: string };
+          if (meta.delta) handlers.onToken?.(meta.delta);
+          break;
+        }
+        case "result":
+          handlers.onResult?.(payload.payload as StockAnalysisResponse);
+          break;
+        case "error":
+          handlers.onError?.(String(payload.message ?? "分析失败"));
+          break;
+        case "done":
+          return;
+      }
+    }
+  }
+}
+
 export function getStockNews(code: string): Promise<NewsItem[]> {
   return request(`/api/stocks/${encodeURIComponent(code)}/news`);
 }

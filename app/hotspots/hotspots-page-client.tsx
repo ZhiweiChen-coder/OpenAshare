@@ -207,7 +207,7 @@ export function HotspotsPageClient() {
   }, []);
 
   return (
-    <>
+    <div className="hotspots-page">
       <section className="panel section news-hero">
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
           <button className="button ghost" type="button" onClick={refreshPage} disabled={manualRefreshing}>
@@ -662,7 +662,7 @@ export function HotspotsPageClient() {
           </section>
         </aside>
       </section>
-    </>
+    </div>
   );
 }
 
