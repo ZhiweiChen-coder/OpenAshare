@@ -53,11 +53,18 @@ SYSTEM_PROMPT = """你是 Ashare Agent（中文输出）。目标：尽量少调
 - 如果问题缺少关键对象（股票、主题、时间范围），先提出一个简短澄清问题。
 - 如果无法从现有工具得到答案，要直接说明目前拿不到，而不是假装已经验证。
 
+## 市场覆盖（重要）
+- 工具同时支持 A股、港股、美股。美股用中文名也能查（如 英伟达=US.NVDA、苹果=US.AAPL、特斯拉=US.TSLA、台积电=US.TSM）。
+- 不要说“我只聚焦A股”，也不要因为标的是美股/港股就拒绝分析或直接降级到联网搜索。先 search_stocks→get_stock_analysis 拿真实行情和信号；只有工具确实返回失败/无数据时，才说明拿不到并可选联网补充。
+
 ## 工具使用策略（智能、少而准）
 - 只有在需要数据时才调用工具；避免为了“看起来更全”而把所有工具都跑一遍。
 - 问候/闲聊（如“你好”）不要调用任何工具，直接一句欢迎+可选示例即可。
-- 单股：先 search_stocks→get_stock_analysis；只有用户明确要“消息/新闻/公告/最新”才 get_stock_news。
-- 世界/宏观/突发：优先 get_global_news；只有用户明确要实时/最新/联网时才 web_search（最多 3 条）。
+- 单股（含美股/港股）：先 search_stocks→get_stock_analysis。
+  - 默认【不要】调 get_stock_news；只有用户句子里出现“消息/新闻/公告/最新/动态/利好/利空”等词时才调。
+  - 单股提问【禁止】调用 get_global_news / list_hotspots（它们只返回泛泛的全球头条/热点，与个股无关，会让回答跑题变长）。除非用户明确说“最新消息/联网/搜一下”，否则也不要对单股用 web_search。
+- 世界/宏观/突发：以 get_global_news 为主，通常一个工具就够。
+  - 【不要】同一次又叠加 web_search / get_hotspot_detail；只有用户明确点名某主题或要求“联网/搜一下”时才追加，且最多再加 1 个工具。
 - 热点：list_hotspots；用户点名某主题才 get_hotspot_detail。
 - 持仓：get_portfolio_analysis。
 
@@ -87,6 +94,10 @@ SYSTEM_PROMPT = """你是 Ashare Agent（中文输出）。目标：尽量少调
 示例 5
 用户：海光信息为什么走强
 你的做法：这是开放问题，可以结合个股分析、消息、热点来回答；如果证据不足，要明确说“目前只能从技术面/消息面做有限判断”。
+
+示例 6
+用户：英伟达最近怎么样
+你的做法：这是美股单股提问。先 search_stocks（英伟达→US.NVDA）→get_stock_analysis 拿价格/信号，给短结论+一个风险点。不要调用 get_global_news / list_hotspots，也不要说“我只聚焦A股”。
 
 ## 输出格式（用于前端 carousel）
 - summary 必须是 markdown，并用 2~4 个 '## 标题' 分段（每段就是一个 topic card）。
@@ -315,24 +326,28 @@ def build_agent_response(
     """Convert agent output and tool results into the API response for the chat."""
     payload: Dict[str, Any] = {}
     citations: List[str] = []
+    stock_analyses: List[Dict[str, Any]] = []
     for item in tool_results:
         name = item.get("tool", "")
         data = item.get("data")
         if name == "get_stock_analysis" and data:
-            payload.update(
-                {
-                    "stock_name": data.get("stock_name"),
-                    "stock_code": data.get("stock_code"),
-                    "market": data.get("market"),
-                    "quote": data.get("quote"),
-                    "technical_indicators": data.get("technical_indicators", {}),
-                    "signal_summary": data.get("signal_summary"),
-                    "technical_commentary": data.get("technical_commentary", []),
-                    "ai_insight": data.get("ai_insight", {"enabled": False}),
-                    "chart_series": data.get("chart_series", []),
-                    "metadata": data.get("metadata", {}),
-                }
-            )
+            stock_analyses.append(data)
+            # 顶层字段保留第一只，兼容只渲染单卡的旧逻辑；多只在循环后存成 stocks 数组。
+            if len(stock_analyses) == 1:
+                payload.update(
+                    {
+                        "stock_name": data.get("stock_name"),
+                        "stock_code": data.get("stock_code"),
+                        "market": data.get("market"),
+                        "quote": data.get("quote"),
+                        "technical_indicators": data.get("technical_indicators", {}),
+                        "signal_summary": data.get("signal_summary"),
+                        "technical_commentary": data.get("technical_commentary", []),
+                        "ai_insight": data.get("ai_insight", {"enabled": False}),
+                        "chart_series": data.get("chart_series", []),
+                        "metadata": data.get("metadata", {}),
+                    }
+                )
             citations.append(f"/api/stocks/{data.get('stock_code', '')}/analysis")
         elif name == "get_stock_news" and data:
             payload["news"] = data
@@ -369,14 +384,18 @@ def build_agent_response(
         elif name == "get_hotspot_detail" and data:
             payload["hotspot_detail"] = data
             citations.append("/api/hotspots/...")
+    # 个股对比：返回多只分析时，存成数组供前端各渲染一张卡（单只时不设，行为不变）。
+    if len(stock_analyses) > 1:
+        payload["stocks"] = stock_analyses
     payload["_meta"] = {
         "tools_used": list(dict.fromkeys([item.get("tool", "") for item in tool_results if item.get("tool")])),
         "cache_hits": [],
     }
 
     summary = (output.summary or "").strip()
-    if len(summary) > 1200:
-        summary = summary[:1200].rstrip() + "\n\n（已截断）"
+    # 与系统提示词的 <450 字目标对齐（留一定余量），避免出现远超目标的超长正文。
+    if len(summary) > 700:
+        summary = summary[:700].rstrip() + "\n\n（已截断）"
     actions = [str(item).strip() for item in (output.actions or []) if str(item).strip()]
     actions = actions[:3]
     citations = list(dict.fromkeys(citations))

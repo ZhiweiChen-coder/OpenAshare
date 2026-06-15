@@ -823,23 +823,34 @@ function PayloadCards({ response }: { response: AgentResponse }) {
   const payload = response.payload;
   const meta = payload._meta;
   const hasStockAnalysis = Boolean(payload.stock_code && payload.quote);
+  // 个股对比：后端在分析多只股票时返回 stocks 数组，逐只渲染股票卡。
+  const stocks = Array.isArray(payload.stocks) ? (payload.stocks as unknown as StockAnalysisResponse[]) : [];
   const hasPortfolio = Array.isArray(payload.positions);
   const news = Array.isArray(payload.news) ? (payload.news as NewsItem[]) : [];
   const hotspots = Array.isArray(payload.hotspots) ? (payload.hotspots as HotspotItem[]) : [];
   const globalNews = Array.isArray(payload.global_news) ? (payload.global_news as GlobalNewsItem[]) : [];
   const webResults = Array.isArray(payload.web_results) ? (payload.web_results as WebSearchResult[]) : [];
+  const isAgent = response.intent === "pydantic_ai_agent";
+  // 当提问聚焦到具体个股（有个股分析或个股消息）时，通用的「全球重点新闻」「热点」
+  // 与问题无关，不再铺出来，避免回复跑题变长。宏观提问（无个股焦点）仍正常显示全球新闻。
+  // 注意：不能用 web_results 判断——宏观提问也常带联网搜索结果，会误杀全球新闻。
+  const isStockFocused = hasStockAnalysis || news.length > 0;
   const showStock =
-    response.intent === "stock_analysis" || response.intent === "stock_comparison" || response.intent === "pydantic_ai_agent";
-  const showNews = response.intent === "news_lookup" || response.intent === "pydantic_ai_agent";
-  const showPortfolio = response.intent === "portfolio_analysis" || response.intent === "pydantic_ai_agent";
-  const showGlobalNews = response.intent === "pydantic_ai_agent";
-  const showWebResults = response.intent === "pydantic_ai_agent";
-  const showHotspots = response.intent === "pydantic_ai_agent";
+    response.intent === "stock_analysis" || response.intent === "stock_comparison" || isAgent;
+  const showNews = response.intent === "news_lookup" || isAgent;
+  const showPortfolio = response.intent === "portfolio_analysis" || isAgent;
+  const showGlobalNews = isAgent && !isStockFocused;
+  const showWebResults = isAgent;
+  const showHotspots = isAgent && !isStockFocused;
 
   return (
     <div className="stack" style={{ marginTop: 14 }}>
       {meta?.tools_used?.length ? <AgentMetaChips toolsUsed={meta.tools_used} cacheHits={meta.cache_hits ?? []} /> : null}
-      {showStock && hasStockAnalysis ? <StockAnalysisCard analysis={payload as unknown as StockAnalysisResponse} /> : null}
+      {showStock && stocks.length > 1
+        ? stocks.map((stock) => <StockAnalysisCard key={stock.stock_code} analysis={stock} />)
+        : showStock && hasStockAnalysis
+          ? <StockAnalysisCard analysis={payload as unknown as StockAnalysisResponse} />
+          : null}
       {showNews && news.length ? <NewsCards news={news} /> : null}
       {showGlobalNews && globalNews.length ? <GlobalNewsCards news={globalNews} /> : null}
       {showWebResults && webResults.length ? <WebResultCards results={webResults} /> : null}
