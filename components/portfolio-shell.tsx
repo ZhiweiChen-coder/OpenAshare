@@ -1527,6 +1527,9 @@ function mergeLatestAnalysisWithExisting(
     if (hasStrategyScore(item)) {
       return item;
     }
+    if (item.analysis_status === "degraded" || item.analysis_status === "local") {
+      return item;
+    }
     const previous = existingById.get(item.holding.id) ?? existingByCode.get(item.holding.stock_code);
     return previous && hasStrategyScore(previous) ? buildLocalHoldingAnalysis(item.holding, previous) : item;
   });
