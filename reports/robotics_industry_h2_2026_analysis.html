@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="机器人产业链A股与港股重点标的基本面、技术面、消息面及组合比例分析">
+  <title>机器人产业链下半年投研报告：A股与港股重点标的配置方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #647085;
+      --subtle: #8a95a8;
+      --bg: #f3f6f8;
+      --paper: #ffffff;
+      --line: #d9e0e8;
+      --line-strong: #aeb9c8;
+      --navy: #203a5f;
+      --cyan: #087f8c;
+      --green: #127447;
+      --amber: #a06100;
+      --red: #b42318;
+      --steel: #eef3f6;
+      --chip: #e8f2f3;
+      --warm: #fff3df;
+      --risk: #fee7e4;
+      --shadow: 0 18px 46px rgba(21, 35, 57, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Trebuchet MS", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        linear-gradient(90deg, rgba(32, 58, 95, 0.045) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(32, 58, 95, 0.045) 1px, transparent 1px),
+        var(--bg);
+      background-size: 32px 32px;
+      color: var(--ink);
+      line-height: 1.62;
+    }
+
+    a {
+      color: var(--cyan);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(8, 127, 140, 0.25);
+    }
+
+    a:hover { border-bottom-color: currentColor; }
+
+    main {
+      width: min(1240px, calc(100% - 34px));
+      margin: 0 auto;
+      padding: 32px 0 60px;
+    }
+
+    header {
+      position: relative;
+      padding: 32px 0 22px;
+      border-bottom: 3px solid var(--ink);
+    }
+
+    header::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      bottom: -3px;
+      width: min(420px, 45%);
+      height: 3px;
+      background: linear-gradient(90deg, var(--cyan), var(--amber));
+    }
+
+    .kicker {
+      margin: 0 0 8px;
+      color: var(--cyan);
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 980px;
+      font-size: clamp(30px, 5vw, 58px);
+      line-height: 1.06;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 960px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 18px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 4px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.8);
+      color: #33415c;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 11px 0;
+      margin: 0 0 12px;
+      background: rgba(243, 246, 248, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    nav a {
+      flex: 0 0 auto;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    section { margin-top: 34px; }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(23px, 3vw, 32px);
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 8px 0; }
+
+    .muted { color: var(--muted); }
+    .small { color: var(--muted); font-size: 13px; }
+
+    .panel {
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .plain {
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .score-tile {
+      min-height: 150px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .score-tile strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .score-tile .score {
+      margin-bottom: 6px;
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .score-tile:nth-child(1) { border-top: 4px solid var(--cyan); }
+    .score-tile:nth-child(2) { border-top: 4px solid var(--green); }
+    .score-tile:nth-child(3) { border-top: 4px solid var(--amber); }
+    .score-tile:nth-child(4) { border-top: 4px solid var(--red); }
+
+    .callout {
+      border-left: 5px solid var(--cyan);
+      background: var(--chip);
+      padding: 14px 16px;
+      border-radius: 8px;
+    }
+
+    .risk-callout {
+      border-left-color: var(--red);
+      background: var(--risk);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .three-col {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 11px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--steel);
+      color: #34445c;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .tag-core { background: #e6f3f4; color: var(--cyan); }
+    .tag-quality { background: #e8f4ed; color: var(--green); }
+    .tag-watch { background: #fff1d6; color: var(--amber); }
+    .tag-risk { background: #fee7e4; color: var(--red); }
+    .tag-neutral { background: #edf1f8; color: #40516e; }
+
+    .stock-card {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 18px;
+      margin-top: 16px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .stock-identity {
+      padding: 18px;
+      background: #172033;
+      color: #fff;
+    }
+
+    .stock-identity .code {
+      color: #c8d4e4;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .stock-identity .name {
+      margin-top: 8px;
+      font-size: 27px;
+      font-weight: 900;
+      line-height: 1.12;
+    }
+
+    .stock-identity .role {
+      margin-top: 12px;
+      color: #dce6f2;
+      font-size: 13px;
+    }
+
+    .stock-body { padding: 18px; }
+
+    .lens-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .lens {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfd;
+      min-height: 190px;
+    }
+
+    .lens strong {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--navy);
+    }
+
+    .action-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .action {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+
+    .action b {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 150px 1fr 52px;
+      gap: 10px;
+      align-items: center;
+      margin: 9px 0;
+      font-size: 14px;
+    }
+
+    .bar-track {
+      height: 12px;
+      border-radius: 999px;
+      background: #e6ebf1;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--cyan), var(--green));
+    }
+
+    .bar.hot { background: linear-gradient(90deg, var(--amber), var(--red)); }
+    .bar.defense { background: linear-gradient(90deg, #60728b, var(--cyan)); }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 150px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .step::before {
+      content: attr(data-step);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 8px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    ul {
+      margin: 8px 0;
+      padding-left: 19px;
+    }
+
+    li { margin: 6px 0; }
+
+    .source-list {
+      columns: 2;
+      column-gap: 24px;
+    }
+
+    .source-list li { break-inside: avoid; }
+
+    footer {
+      margin-top: 42px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line-strong);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .dashboard, .two-col, .three-col, .stock-card, .lens-grid, .action-strip, .timeline {
+        grid-template-columns: 1fr;
+      }
+
+      .score-grid { grid-template-columns: 1fr 1fr; }
+      .stock-identity .name { font-size: 24px; }
+      .source-list { columns: 1; }
+    }
+
+    @media (max-width: 640px) {
+      main { width: min(100% - 24px, 1240px); padding-top: 22px; }
+      .score-grid { grid-template-columns: 1fr; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+      th, td { min-width: 160px; white-space: normal; }
+      .bar-row { grid-template-columns: 112px 1fr 44px; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      nav { display: none; }
+      .panel, .stock-card, .score-tile, .plain, .step { box-shadow: none; }
+      a { color: inherit; border: 0; }
+      main { width: 100%; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="kicker">Robotics Chain Research</p>
+    <h1>机器人产业链下半年投研报告：A股与港股重点标的配置方案</h1>
+    <p class="subtitle">覆盖瑞芯微、兆易创新、优必选、埃斯顿、北方稀土，并补充汇川技术、绿的谐波、三花智控、奥比中光、柯力传感、鸣志电器、中大力德等扩展标的。最终组合限定在五个标的以内，分析框架为基本面、技术面、消息面三维交叉验证。</p>
+    <div class="meta-row">
+      <span class="pill">生成日期：2026-07-04</span>
+      <span class="pill">行情基准：2026-07-03 收盘</span>
+      <span class="pill">视角：3-6个月主题配置</span>
+      <span class="pill">定位：研究报告，不构成投资建议</span>
+    </div>
+  </header>
+
+  <nav aria-label="报告目录">
+    <a href="#summary">一页结论</a>
+    <a href="#industry">产业判断</a>
+    <a href="#core-stocks">核心标的</a>
+    <a href="#new-names">新增标的</a>
+    <a href="#allocation">组合比例</a>
+    <a href="#playbook">交易计划</a>
+    <a href="#risk">风险清单</a>
+    <a href="#sources">资料来源</a>
+  </nav>
+
+  <section id="summary">
+    <h2>一页结论</h2>
+    <div class="dashboard">
+      <div class="panel">
+        <h3>核心观点</h3>
+        <p>机器人方向仍是下半年值得跟踪的主线，但当前不是“看到涨停就追”的阶段。组合需要压缩到五个以内：芯片与工控做底仓，稀土永磁作为材料侧对冲，兆易创新提供半导体周期弹性，埃斯顿提供机器人纯度。其他高弹性标的只进入观察池。</p>
+        <div class="callout">
+          <strong>操作倾向：</strong> 五标的主组合为瑞芯微、汇川技术、北方稀土、兆易创新、埃斯顿。当前建议先部署50%-60%，保留40%-50%现金等回踩；优必选、绿的谐波、三花智控暂不进入主组合，只做替补观察。
+        </div>
+      </div>
+      <div class="panel">
+        <h3>赛道优先级</h3>
+        <div class="bar-row"><span>运动控制/执行器</span><div class="bar-track"><div class="bar hot" style="width: 92%"></div></div><b>92</b></div>
+        <div class="bar-row"><span>边缘AI芯片/MCU</span><div class="bar-track"><div class="bar" style="width: 86%"></div></div><b>86</b></div>
+        <div class="bar-row"><span>工业机器人/自动化</span><div class="bar-track"><div class="bar" style="width: 78%"></div></div><b>78</b></div>
+        <div class="bar-row"><span>稀土永磁/材料</span><div class="bar-track"><div class="bar defense" style="width: 72%"></div></div><b>72</b></div>
+        <div class="bar-row"><span>人形机器人整机</span><div class="bar-track"><div class="bar hot" style="width: 68%"></div></div><b>68</b></div>
+      </div>
+    </div>
+
+    <div class="score-grid">
+      <div class="score-tile">
+        <strong>最适合做核心</strong>
+        <div class="score">瑞芯微 + 汇川技术</div>
+        <p class="small">盈利质量、产业位置和波动控制相对更均衡。</p>
+      </div>
+      <div class="score-tile">
+        <strong>最强主题弹性</strong>
+        <div class="score">埃斯顿</div>
+        <p class="small">保留机器人纯度，但不追涨停，只等分歧回踩。</p>
+      </div>
+      <div class="score-tile">
+        <strong>材料对冲</strong>
+        <div class="score">北方稀土</div>
+        <p class="small">不是机器人纯标的，但受益于永磁材料和供应链定价。</p>
+      </div>
+      <div class="score-tile">
+        <strong>替补观察</strong>
+        <div class="score">优必选 / 绿的谐波</div>
+        <p class="small">弹性很强，但当前波动过大，不放入主组合。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="industry">
+    <h2>产业判断：下半年看三条线</h2>
+    <div class="three-col">
+      <div class="plain">
+        <h3>第一条线：物理AI落地</h3>
+        <p>机器人从“机械自动化”走向“感知、决策、执行”的闭环，边缘AI芯片、视觉传感、力控、运动控制会成为关键增量。英伟达等公司持续强调physical AI，也会强化市场对机器人链条的风险偏好。</p>
+      </div>
+      <div class="plain">
+        <h3>第二条线：关节与执行器</h3>
+        <p>人形机器人最重要的成本与性能环节集中在关节、执行器、减速器、电机、传感器。海外研究与媒体讨论中，执行器被视为人形机器人BOM中非常高的成本项，因此A股零部件链条最容易成为交易主战场。</p>
+      </div>
+      <div class="plain">
+        <h3>第三条线：工业场景先兑现</h3>
+        <p>真正更快形成收入的不是家庭陪伴机器人，而是工厂、仓储、汽车、电子制造、检测、搬运等工业场景。工业自动化订单、毛利率修复和海外客户验证，比单纯概念发布更重要。</p>
+      </div>
+    </div>
+    <div class="callout risk-callout" style="margin-top: 14px;">
+      <strong>风险提示：</strong> 机器人方向长期想象空间很大，但短期很多公司利润还没有跟上股价。强消息、弱业绩的标的只能当交易仓；业绩、订单、产业位置三者都能验证的公司，才适合做核心仓。
+    </div>
+  </section>
+
+  <section id="core-stocks">
+    <h2>核心标的三维分析</h2>
+
+    <article class="stock-card">
+      <div class="stock-identity">
+        <div class="code">603893.SH</div>
+        <div class="name">瑞芯微</div>
+        <div class="role">边缘AI SoC / 机器人视觉与控制芯片</div>
+      </div>
+      <div class="stock-body">
+        <div class="lens-grid">
+          <div class="lens">
+            <strong>基本面</strong>
+            <p>2026Q1营收约12.05亿元，同比+36.2%；归母净利约3.29亿元，同比+57.2%；毛利率约43.0%。在本组合里，它的盈利质量和成长确定性相对更均衡。</p>
+          </div>
+          <div class="lens">
+            <strong>技术面</strong>
+            <p>7月3日收180.03元，略低于5日和10日均线，但仍高于20日均线约2.4%；RSI约66.7，属于偏强但未极端过热。技术形态比涨停潮标的更健康。</p>
+          </div>
+          <div class="lens">
+            <strong>消息面</strong>
+            <p>机器人需要本地视觉、语音、感知和边缘推理能力，瑞芯微处在“机器人更智能”这条线。它不是最刺激的标的，但更适合承担组合核心。</p>
+          </div>
+        </div>
+        <div class="action-strip">
+          <div class="action"><b>优势</b>盈利质量较好，机器人链条逻辑自然，波动低于纯主题股。</div>
+          <div class="action"><b>风险</b>估值已反映部分AIoT与边缘AI预期，若消费电子走弱会拖累。</div>
+          <div class="action"><b>策略</b>回踩20日线附近仍强可分批，跌破中期均线需降仓观察。</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="stock-card">
+      <div class="stock-identity">
+        <div class="code">603986.SH</div>
+        <div class="name">兆易创新</div>
+        <div class="role">存储 / MCU / 机器人控制与存储间接受益</div>
+      </div>
+      <div class="stock-body">
+        <div class="lens-grid">
+          <div class="lens">
+            <strong>基本面</strong>
+            <p>2026Q1营收约41.88亿元，同比+119.4%；归母净利约14.61亿元，同比+522.8%；毛利率约57.1%。基本面爆发来自存储周期与产品价格修复，但周期属性也意味着弹性和回撤都很大。</p>
+          </div>
+          <div class="lens">
+            <strong>技术面</strong>
+            <p>7月3日收677.77元，仍高于20日线约8.0%，但距离20日高点回撤约20%。放量下杀后短期趋势被破坏，说明恐慌和获利盘还没完全消化。</p>
+          </div>
+          <div class="lens">
+            <strong>消息面</strong>
+            <p>机器人会增加MCU、NOR Flash、存储和控制芯片需求，但兆易不是纯机器人股。它更像“存储大周期 + 国产芯片 + 机器人间接增量”的复合弹性。</p>
+          </div>
+        </div>
+        <div class="action-strip">
+          <div class="action"><b>优势</b>利润弹性极强，存储周期仍是市场主线之一。</div>
+          <div class="action"><b>风险</b>短线筹码松动，股价对存储价格、半导体情绪高度敏感。</div>
+          <div class="action"><b>策略</b>你已700附近卖出，主动权在手。620-650区域企稳，或重新站回735-750再考虑二次配置。</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="stock-card">
+      <div class="stock-identity">
+        <div class="code">09880.HK</div>
+        <div class="name">优必选</div>
+        <div class="role">人形机器人整机 / 高弹性期权</div>
+      </div>
+      <div class="stock-body">
+        <div class="lens-grid">
+          <div class="lens">
+            <strong>基本面</strong>
+            <p>优必选是港股人形机器人稀缺标的，产业位置好，但整机厂商业化节奏、毛利率和亏损收窄仍需持续验证。它更适合按“产业期权”估值，而不是按成熟制造公司估值。</p>
+          </div>
+          <div class="lens">
+            <strong>技术面</strong>
+            <p>7月3日收108.90港元，单日涨幅约17.6%，成交额约33.5亿港元，收盘接近当日高位。动量很强，但短线追高风险明显，适合用更小仓位。</p>
+          </div>
+          <div class="lens">
+            <strong>消息面</strong>
+            <p>UWorld U1等新产品强化了“家庭与通用人形机器人”的叙事。与此同时，海外媒体也持续讨论人形机器人安全、可靠性和商业化边界，说明主题热但兑现门槛高。</p>
+          </div>
+        </div>
+        <div class="action-strip">
+          <div class="action"><b>优势</b>整机稀缺性强，消息催化密集，港股弹性大。</div>
+          <div class="action"><b>风险</b>盈利不确定、估值波动大、主题降温时回撤会很快。</div>
+          <div class="action"><b>策略</b>只做小仓位，不追单日大涨，优先等回踩或放量平台确认。</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="stock-card">
+      <div class="stock-identity">
+        <div class="code">002747.SZ</div>
+        <div class="name">埃斯顿</div>
+        <div class="role">工业机器人 / 伺服与运动控制</div>
+      </div>
+      <div class="stock-body">
+        <div class="lens-grid">
+          <div class="lens">
+            <strong>基本面</strong>
+            <p>2026Q1营收约12.17亿元，同比-2.2%；归母净利约9784万元，同比+674.6%；毛利率约30.4%。利润修复很亮眼，但收入尚未同步加速，需观察订单和收入质量。</p>
+          </div>
+          <div class="lens">
+            <strong>技术面</strong>
+            <p>7月3日涨停收44.77元，20日涨幅约51.8%，高于20日线约23.8%，RSI约76.9。它是当前最强的机器人主题之一，但短线已经明显拥挤。</p>
+          </div>
+          <div class="lens">
+            <strong>消息面</strong>
+            <p>中国工厂自动化、工业机器人国产替代和AI赋能制造业都对埃斯顿有利。真正关键是工业机器人订单能否从情绪交易转为业绩兑现。</p>
+          </div>
+        </div>
+        <div class="action-strip">
+          <div class="action"><b>优势</b>机器人纯度高，市场辨识度强，趋势弹性大。</div>
+          <div class="action"><b>风险</b>股价已先于业绩快速反映，追涨停容易承受情绪回撤。</div>
+          <div class="action"><b>策略</b>等5日线或10日线回踩不破再看，放量滞涨需减仓。</div>
+        </div>
+      </div>
+    </article>
+
+    <article class="stock-card">
+      <div class="stock-identity">
+        <div class="code">600111.SH</div>
+        <div class="name">北方稀土</div>
+        <div class="role">稀土资源 / 永磁材料上游对冲</div>
+      </div>
+      <div class="stock-body">
+        <div class="lens-grid">
+          <div class="lens">
+            <strong>基本面</strong>
+            <p>2026Q1营收约118.59亿元，同比+27.7%；归母净利约9.18亿元，同比+113.1%；毛利率约13.2%。资源品属性强，利润受价格、配额和政策影响。</p>
+          </div>
+          <div class="lens">
+            <strong>技术面</strong>
+            <p>7月3日收48.57元，接近20日线，RSI约47.5，20日表现略弱于机器人热股。它不是最强趋势，但正因为不拥挤，适合承担组合稳定器。</p>
+          </div>
+          <div class="lens">
+            <strong>消息面</strong>
+            <p>机器人执行器、电机与关节对永磁材料有潜在增量需求。海外报道也反复提到稀土磁材在机器人供应链中的重要性，北方稀土可作为上游资源对冲。</p>
+          </div>
+        </div>
+        <div class="action-strip">
+          <div class="action"><b>优势</b>资源属性强，政策和供应链定价权提供防守价值。</div>
+          <div class="action"><b>风险</b>不是机器人纯标的，股价更多受稀土价格和政策影响。</div>
+          <div class="action"><b>策略</b>适合低吸配置，不适合用机器人整机逻辑给高估值。</div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section id="new-names">
+    <h2>新增候选标的</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>标的</th>
+          <th>产业位置</th>
+          <th>7月3日技术状态</th>
+          <th>优点</th>
+          <th>使用方式</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>汇川技术</strong><br><span class="small">300124.SZ</span></td>
+          <td>工控、伺服、自动化核心龙头</td>
+          <td>收72.15元，单日+5.5%，成交放大但未到最极端状态</td>
+          <td>质量较高，机器人和工业自动化均可受益</td>
+          <td><span class="tag tag-quality">核心配置</span></td>
+        </tr>
+        <tr>
+          <td><strong>绿的谐波</strong><br><span class="small">688017.SH</span></td>
+          <td>谐波减速器，机器人关节核心零部件</td>
+          <td>收488.00元，单日约+18.1%，极强但过热</td>
+          <td>纯度高，辨识度强</td>
+          <td><span class="tag tag-watch">等回踩</span></td>
+        </tr>
+        <tr>
+          <td><strong>三花智控</strong><br><span class="small">002050.SZ</span></td>
+          <td>热管理、执行器、机器人零部件预期</td>
+          <td>收48.99元，单日约+9.1%，成交额约153.7亿元</td>
+          <td>流动性好，机构关注度高</td>
+          <td><span class="tag tag-watch">中高弹性</span></td>
+        </tr>
+        <tr>
+          <td><strong>奥比中光</strong><br><span class="small">688322.SH</span></td>
+          <td>3D视觉、感知传感器</td>
+          <td>收147.33元，单日约+13.3%，涨幅较大</td>
+          <td>感知链条稀缺，受益于机器人视觉</td>
+          <td><span class="tag tag-risk">小仓位</span></td>
+        </tr>
+        <tr>
+          <td><strong>柯力传感</strong><br><span class="small">603662.SH</span></td>
+          <td>力传感与工业传感器</td>
+          <td>收80.00元，单日约+8.4%</td>
+          <td>力控是人形机器人关键环节</td>
+          <td><span class="tag tag-risk">交易仓</span></td>
+        </tr>
+        <tr>
+          <td><strong>鸣志电器 / 中大力德</strong></td>
+          <td>电机、驱动、减速与传动链条</td>
+          <td>鸣志电器+7.3%；中大力德涨停</td>
+          <td>主题弹性强，容易跟随机器人行情</td>
+          <td><span class="tag tag-risk">轮动池</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="allocation">
+    <h2>组合比例方案</h2>
+    <div class="two-col">
+      <div class="panel">
+        <h3>目标组合：五标的核心版</h3>
+        <p class="small">以下比例是“已投入机器人主题仓位”的内部比例；当前环境下仍建议先只投入计划资金的50%-60%，其余留作现金。</p>
+        <div class="bar-row"><span>瑞芯微</span><div class="bar-track"><div class="bar" style="width: 100%"></div></div><b>28%</b></div>
+        <div class="bar-row"><span>汇川技术</span><div class="bar-track"><div class="bar" style="width: 79%"></div></div><b>22%</b></div>
+        <div class="bar-row"><span>北方稀土</span><div class="bar-track"><div class="bar defense" style="width: 64%"></div></div><b>18%</b></div>
+        <div class="bar-row"><span>兆易创新</span><div class="bar-track"><div class="bar" style="width: 61%"></div></div><b>17%</b></div>
+        <div class="bar-row"><span>埃斯顿</span><div class="bar-track"><div class="bar hot" style="width: 54%"></div></div><b>15%</b></div>
+        <div class="callout" style="margin-top: 14px;">
+          <strong>为什么不放优必选：</strong> 优必选是整机稀缺标的，但短线单日涨幅和港股波动都太大，盈利兑现也更远。它更适合作为替补，不适合作为当前五标的主组合的一员。
+        </div>
+      </div>
+      <div class="panel">
+        <h3>当前执行：先半仓，不急着打满</h3>
+        <p>考虑到半导体和机器人近期波动都很大，建议把主题资金拆成三层，而不是一次性买完。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>阶段</th>
+              <th>资金比例</th>
+              <th>主要动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>第一批</td>
+              <td>25%-30%</td>
+              <td>优先瑞芯微、汇川技术、北方稀土，选择回落日分批。</td>
+            </tr>
+            <tr>
+              <td>第二批</td>
+              <td>20%-30%</td>
+              <td>兆易创新企稳后补；埃斯顿只等缩量回踩或平台换手，不追涨停。</td>
+            </tr>
+            <tr>
+              <td>预留现金</td>
+              <td>40%-50%</td>
+              <td>留给市场恐慌、指数回踩、龙头二次确认后的机会。</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <strong>关键原则：</strong> 你刚从兆易高位兑现，最大的优势是现金和主动权。现在最重要的不是马上把收益重新压上去，而是等高赔率点位出现。
+        </div>
+        <h4>替补规则</h4>
+        <p class="small">如果必须换入优必选或绿的谐波，优先替换埃斯顿的部分仓位，而不是扩成六个或七个标的。组合越热，越要保持简单。</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="playbook">
+    <h2>交易计划：四步执行</h2>
+    <div class="timeline">
+      <div class="step" data-step="1">
+        <h3>确认市场温度</h3>
+        <p>若半导体和机器人继续放量急跌，先等恐慌盘释放；若指数缩量企稳，才开始第一批配置。</p>
+      </div>
+      <div class="step" data-step="2">
+        <h3>先买低拥挤核心</h3>
+        <p>瑞芯微、汇川技术、北方稀土优先。它们不是最刺激，但组合回撤更容易控制。</p>
+      </div>
+      <div class="step" data-step="3">
+        <h3>弹性仓等回踩</h3>
+        <p>五标的内只保留埃斯顿作为弹性仓。绿的谐波、三花智控、优必选暂时只观察，除非主组合里有标的被替换。</p>
+      </div>
+      <div class="step" data-step="4">
+        <h3>用规则止盈止损</h3>
+        <p>单只主题股若跌破20日线且放量，先减半；若连续加速远离均线，分批兑现，不把利润交给情绪。</p>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top: 14px;">
+      <h3>重点价格观察</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>标的</th>
+            <th>观察位</th>
+            <th>动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>兆易创新</td>
+            <td>620-650企稳，或重新站回735-750</td>
+            <td>前者是低吸修复，后者是趋势重新确认；中间区域不急。</td>
+          </tr>
+          <tr>
+            <td>瑞芯微</td>
+            <td>20日线附近承接是否稳定</td>
+            <td>若缩量回踩不破，可作为第一批核心。</td>
+          </tr>
+          <tr>
+            <td>埃斯顿</td>
+            <td>5日/10日线回踩后的换手</td>
+            <td>涨停后不追，等资金分歧后的二次选择。</td>
+          </tr>
+          <tr>
+            <td>优必选</td>
+            <td>大涨后能否守住新平台</td>
+            <td>只做小仓位，若单日巨量冲高回落需谨慎。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="risk">
+    <h2>风险清单</h2>
+    <div class="two-col">
+      <div class="plain">
+        <h3>必须降低仓位的信号</h3>
+        <ul>
+          <li>机器人高弹性股连续放量冲高回落，且第二天无法反包。</li>
+          <li>半导体、存储、AI硬件同步破位，主题资金从科技成长撤出。</li>
+          <li>核心股跌破20日均线后反抽无量，说明趋势资金开始撤退。</li>
+          <li>人形机器人新品发布很多，但没有订单、收入和量产节奏跟上。</li>
+          <li>稀土或零部件供应链出现政策或价格剧烈反向波动。</li>
+        </ul>
+      </div>
+      <div class="plain">
+        <h3>可以加仓的信号</h3>
+        <ul>
+          <li>强势股第一次深回踩后缩量企稳，且龙头没有跌破关键均线。</li>
+          <li>瑞芯微、汇川技术这类质量股先于题材股恢复趋势。</li>
+          <li>机器人产业出现订单、量产、交付、客户验证等硬催化。</li>
+          <li>兆易创新从恐慌中修复，并重新获得半导体资金承接。</li>
+          <li>指数回踩但成交没有失控，主题内部有清晰的新龙头出现。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="sources">
+    <h2>资料来源与口径说明</h2>
+    <div class="panel">
+      <p>行情数据以2026-07-03收盘为基准；财务数据使用上市公司已披露季度/年度财务口径，并通过东方财富财报数据交叉整理。新闻与行业判断来自公开媒体与行业报道，报告中的仓位比例是研究组合建议，不构成任何保证收益或个性化投资建议。</p>
+      <ul class="source-list">
+        <li><a href="https://finance.sina.com.cn/stock/" target="_blank" rel="noopener noreferrer">新浪财经行情中心</a>：A股与港股收盘价、成交量、涨跌幅。</li>
+        <li><a href="https://data.eastmoney.com/bbsj/" target="_blank" rel="noopener noreferrer">东方财富财报数据</a>：上市公司营业收入、归母净利润、毛利率、ROE等。</li>
+        <li><a href="https://www.marketwatch.com/story/nvidia-is-betting-on-a-trillion-dollar-robotics-boom-here-is-the-hidden-way-to-trade-it-c5b10c4e" target="_blank" rel="noopener noreferrer">MarketWatch：英伟达与机器人产业链机会</a>。</li>
+        <li><a href="https://www.wsj.com/tech/the-quest-to-make-humanoid-robots-safe-enough-for-humans-4887c123" target="_blank" rel="noopener noreferrer">The Wall Street Journal：人形机器人安全与商业化挑战</a>。</li>
+        <li><a href="https://www.wsj.com/business/skf-forms-robotics-jv-with-leaderdrive-in-china-818ab639" target="_blank" rel="noopener noreferrer">The Wall Street Journal：SKF与绿的谐波相关产业链合资消息</a>。</li>
+        <li><a href="https://www.ft.com/content/b4649cba-c74b-4cee-b342-0adf6c937705" target="_blank" rel="noopener noreferrer">Financial Times：中国工厂机器人与AI自动化趋势</a>。</li>
+        <li><a href="https://www.techradar.com/ai-platforms-assistants/ubtech-just-introduced-its-first-full-size-ultra-bionic-humanoid-robot-but-what-it-really-wants-to-do-is-make-robot-replicas-of-loved-ones-thats-a-hard-no" target="_blank" rel="noopener noreferrer">TechRadar：优必选UWorld U1人形机器人消息</a>。</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>本报告由本地A股AI策略分析工作区生成。报告用于辅助研究和复盘，不替代个人独立判断；高波动主题需要严格控制仓位和止损。</p>
+  </footer>
+</main>
+</body>
+</html>
