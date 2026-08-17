@@ -48,9 +48,14 @@ function apiBaseUrl(): string {
   return String(serverBase).replace(/\/$/, "");
 }
 
+function apiUrl(path: string): string {
+  const base = apiBaseUrl();
+  return base ? `${base}${path}` : path;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const base = apiBaseUrl();
-  const url = base ? `${base}${path}` : path;
+  const url = apiUrl(path);
   const method = (init?.method ?? "GET").toUpperCase();
   const authHeaders = await getBrowserAuthHeaders();
   let response: Response;
@@ -309,7 +314,7 @@ export async function streamStockAnalysis(
   handlers: StockAnalysisStreamHandlers,
 ): Promise<void> {
   const response = await fetch(
-    `/api/stocks/${encodeURIComponent(code)}/analysis/stream?include_ai=true`,
+    apiUrl(`/api/stocks/${encodeURIComponent(code)}/analysis/stream?include_ai=true`),
     {
       headers: { Accept: "text/event-stream", ...(await getBrowserAuthHeaders()) },
       cache: "no-store",
@@ -518,9 +523,9 @@ export function refreshStrategyHoldings(options?: {
 }
 
 /**
- * Agent goes through Next.js Route Handler POST /api/agent/query (app/api/agent/query/route.ts).
- * That handler proxies to FastAPI with a long timeout — avoids browser CORS to :8000 and
- * avoids rewrite ECONNRESET. Client always uses same-origin URL.
+ * Use the same API-origin selection as every other browser request. Hosted calls
+ * must bypass Vercel's same-origin proxy so their Supabase Authorization header
+ * reaches FastAPI; local and preview requests stay on the local proxy.
  */
 const AGENT_REQUEST_TIMEOUT_MS = 130_000; // slightly longer than server proxy timeout
 
@@ -549,7 +554,7 @@ export async function queryAgent(
     }
   }
   try {
-    const response = await fetch("/api/agent/query", {
+    const response = await fetch(apiUrl("/api/agent/query"), {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json", ...(await getBrowserAuthHeaders()) },
@@ -602,7 +607,7 @@ export async function streamAgent(
   }
 
   try {
-    const response = await fetch("/api/agent/query/stream", {
+    const response = await fetch(apiUrl("/api/agent/query/stream"), {
       method: "POST",
       cache: "no-store",
       headers: { "Content-Type": "application/json", Accept: "text/event-stream", ...(await getBrowserAuthHeaders()) },
