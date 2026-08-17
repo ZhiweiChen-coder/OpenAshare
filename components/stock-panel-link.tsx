@@ -14,7 +14,7 @@ type StockPanelLinkProps = {
 
 export function StockPanelLink({ stockCode, panel, className, children, compactLoading = false }: StockPanelLinkProps) {
   const router = useRouter();
-  const fallbackHref = `/stocks?query=${encodeURIComponent(stockCode)}&panel=${panel}#${panel}`;
+  const fallbackHref = `/work?symbol=${encodeURIComponent(stockCode)}`;
   const [isNavigating, setIsNavigating] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const openingSteps = panel === "news" ? NEWS_OPENING_STEPS : AI_OPENING_STEPS;
@@ -40,7 +40,7 @@ export function StockPanelLink({ stockCode, panel, className, children, compactL
     }
     setIsNavigating(true);
     const requestId = crypto.randomUUID();
-    router.push(`/stocks?query=${encodeURIComponent(stockCode)}&panel=${panel}&request_id=${encodeURIComponent(requestId)}#${panel}`);
+    router.push(`/work?symbol=${encodeURIComponent(stockCode)}&request_id=${encodeURIComponent(requestId)}`);
   }
 
   return (

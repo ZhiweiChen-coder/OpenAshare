@@ -1,5 +1,5 @@
-import { AgentChat } from "@/components/agent-chat";
+import { redirect } from "next/navigation";
 
 export default function AgentPage() {
-  return <AgentChat />;
+  redirect("/work");
 }

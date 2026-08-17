@@ -38,6 +38,7 @@ BASE_STOCK_CATALOG: Dict[str, Dict[str, str]] = {
     "科创50": {"code": "sh000688", "market": "指数-科创板", "category": "指数"},
     "沪深300": {"code": "sh000300", "market": "指数-沪深", "category": "指数"},
     "中证500": {"code": "sh000905", "market": "指数-中证", "category": "指数"},
+    "恒生指数": {"code": "HK.HSI", "market": "指数-香港", "category": "指数"},
     # 港股主要股票
     "腾讯控股": {"code": "00700.HK", "market": "港股", "category": "科技"},
     "阿里巴巴": {"code": "09988.HK", "market": "港股", "category": "科技"},
@@ -72,6 +73,8 @@ BASE_STOCK_CATALOG: Dict[str, Dict[str, str]] = {
     "欧菲光": {"code": "sz002456", "market": "A股-深圳", "category": "科技"},
     "海光信息": {"code": "sh688041", "market": "A股-科创板", "category": "科技"},
     "寒武纪": {"code": "sh688256", "market": "A股-科创板", "category": "科技"},
+    "长鑫科技": {"code": "sh688825", "market": "A股-科创板", "category": "半导体"},
+    "长鑫存储": {"code": "sh688825", "market": "A股-科创板", "category": "半导体"},
     "兆易创新": {"code": "sh603986", "market": "A股-上海", "category": "科技"},
     # 新能源
     "阳光电源": {"code": "sz300274", "market": "A股-创业板", "category": "新能源"},
@@ -260,6 +263,8 @@ def normalize_stock_code(code: str) -> str:
     if re.fullmatch(r"\d{1,4}\.HK", upper):
         symbol = upper.split(".")[0].zfill(5)
         return f"{symbol}.HK"
+    if upper in {"HSI", "HK.HSI", "^HSI"}:
+        return "HK.HSI"
 
     # 美股：显式 ``US.`` 前缀
     if upper.startswith("US.") and re.fullmatch(US_TICKER_PATTERN, upper[3:]):
@@ -277,6 +282,8 @@ def extract_symbol(code: str) -> str:
         return normalized[2:]
     if normalized.upper().endswith(".HK"):
         return normalized[:-3]
+    if normalized.upper() == "HK.HSI":
+        return "^HSI"
     if normalized.upper().startswith("US."):
         return normalized[3:]
     return normalized
@@ -290,6 +297,8 @@ def infer_market(code: str) -> str:
         return "sh"
     if lower.startswith("sz"):
         return "sz"
+    if upper == "HK.HSI":
+        return "hk"
     if upper.endswith(".HK"):
         return "hk"
     if upper.startswith("US."):
@@ -304,6 +313,7 @@ def is_valid_stock_code(code: str) -> bool:
     return bool(
         re.fullmatch(r"(sh|sz)\d{6}", lower)
         or re.fullmatch(r"\d{5}\.HK", upper)
+        or upper == "HK.HSI"
         or re.fullmatch(rf"US\.{US_TICKER_PATTERN}", upper)
     )
 
@@ -324,6 +334,8 @@ def get_market_label(code: str) -> str:
         if lower.startswith("sz300"):
             return "A股-创业板"
         return "A股-深圳"
+    if upper == "HK.HSI":
+        return "指数-香港"
     if upper.endswith(".HK"):
         return "港股"
     if upper.startswith("US."):
@@ -361,6 +373,10 @@ def is_hk_stock(code: str) -> bool:
     return bool(re.fullmatch(r"\d{5}\.HK", normalized))
 
 
+def is_hk_index(code: str) -> bool:
+    return normalize_stock_code(code).upper() == "HK.HSI"
+
+
 def is_us_stock(code: str) -> bool:
     normalized = normalize_stock_code(code).upper()
     return bool(re.fullmatch(rf"US\.{US_TICKER_PATTERN}", normalized))
@@ -376,6 +392,8 @@ def get_monitor_support_level(code: str) -> str:
         return "full"
     if is_us_stock(code):
         return "full"
+    if is_hk_index(code):
+        return "partial"
     if is_hk_stock(code):
         return "partial"
     return "unsupported"

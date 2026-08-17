@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StockSearchResult(BaseModel):
@@ -41,12 +41,6 @@ class AIInsight(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = None
     error: Optional[str] = None
-
-
-class ModelOption(BaseModel):
-    value: str
-    label: str
-    description: Optional[str] = None
 
 
 class StockAnalysisResponse(BaseModel):
@@ -167,6 +161,7 @@ class MarketIndexSnapshot(BaseModel):
 
 class MarketRegimeResponse(BaseModel):
     regime: Literal["risk_on", "neutral", "risk_off"] = "neutral"
+    is_loading: bool = False
     score: float = 50
     action_bias: str = ""
     position_guidance: str = ""
@@ -334,6 +329,7 @@ class AgentHistoryTurn(BaseModel):
 class AgentQuery(BaseModel):
     query: str
     session_id: Optional[str] = None
+    request_id: Optional[str] = None
     history: List[AgentHistoryTurn] = Field(default_factory=list)
 
 
@@ -343,6 +339,14 @@ class AgentResponse(BaseModel):
     actions: List[str] = Field(default_factory=list)
     citations: List[str] = Field(default_factory=list)
     payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CreditBalanceResponse(BaseModel):
+    balance: Optional[int] = None
+    lifetime_granted: int = 0
+    lifetime_purchased: int = 0
+    lifetime_used: int = 0
+    unlimited: bool = False
 
 
 class ProgressEventBase(BaseModel):
@@ -376,15 +380,15 @@ class ProgressDoneEvent(ProgressEventBase):
 
 class UserSettingsResponse(BaseModel):
     llm_model: str
-    llm_model_source: Literal["env", "user"] = "env"
+    llm_model_source: Literal["env"] = "env"
     llm_base_url: Optional[str] = None
     llm_configured: bool = False
     updated_at: Optional[str] = None
-    model_options: List[ModelOption] = Field(default_factory=list)
 
 
 class UserSettingsUpdate(BaseModel):
-    llm_model: str = Field(..., min_length=1, max_length=128)
+    model_config = ConfigDict(extra="forbid")
+
     llm_base_url: Optional[str] = Field(None, max_length=512)
     llm_api_key: Optional[str] = Field(
         None,

@@ -10,6 +10,7 @@ from ashare.logging import get_logger
 from ashare.stock_pool import (
     extract_symbol,
     get_exchange_label,
+    is_hk_index,
     is_us_stock,
     is_valid_stock_code,
     normalize_stock_code,
@@ -99,7 +100,9 @@ class DataFetcher:
         try:
             logger.info(f"正在获取股票 {code} 的数据...")
             df = None
-            if is_us_stock(code):
+            if is_hk_index(code):
+                df = self._fetch_stock_data_hk_index(code, count, frequency)
+            elif is_us_stock(code):
                 # 美股走独立链路：yfinance 主源，Finnhub 备选
                 df = self._fetch_stock_data_us(code, count, frequency)
             else:
@@ -239,11 +242,18 @@ class DataFetcher:
         logger.info("yfinance 未取到 %s 数据，尝试 Finnhub 备选源", code)
         return self._fetch_stock_data_finnhub(code, count, frequency)
 
+    def _fetch_stock_data_hk_index(self, code: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
+        """恒生指数：使用 Yahoo Finance 的指数代码，不走美股 Finnhub 兜底。"""
+        return self._fetch_stock_data_yfinance_symbol("^HSI", count, frequency)
+
     def _fetch_stock_data_yfinance(self, code: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
+        return self._fetch_stock_data_yfinance_symbol(self._us_yf_symbol(code), count, frequency)
+
+    def _fetch_stock_data_yfinance_symbol(self, symbol: str, count: int, frequency: str) -> Optional[pd.DataFrame]:
         try:
             import yfinance as yf
         except ImportError:
-            logger.warning("yfinance 未安装，无法获取美股数据")
+            logger.warning("yfinance 未安装，无法获取行情数据")
             return None
 
         interval = self._YF_INTERVAL.get(frequency)
@@ -251,7 +261,6 @@ class DataFetcher:
             logger.warning("yfinance 不支持的频率: %s", frequency)
             return None
 
-        symbol = self._us_yf_symbol(code)
         lookback = max(7, count * self._LOOKBACK_DAYS_PER_BAR.get(frequency, 2))
         start = (pd.Timestamp.now() - pd.Timedelta(days=lookback)).strftime("%Y-%m-%d")
         end = (pd.Timestamp.now() + pd.Timedelta(days=1)).strftime("%Y-%m-%d")

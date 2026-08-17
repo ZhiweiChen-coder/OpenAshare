@@ -1,8 +1,8 @@
 # Environment variables
 .env
-.env.local
-.env.production
-.env.staging
+.env.*
+!.env.example
+!.env.*.example
 
 # API Keys and sensitive data
 config.py
@@ -10,6 +10,8 @@ config.py
 secrets.json
 *.key
 *.pem
+*.p12
+*.pfx
 
 # Python
 __pycache__/
@@ -66,11 +68,20 @@ data/*.db
 data/agent_memory/
 data/strategy_analysis_cache.json
 data/user_settings.json
+output/
+info
+
+# Local captures (keep curated README screenshots such as agent-research-beta.png)
+assets/screenshots/Screen Recording *
+assets/screenshots/Screenshot *.png
+assets/screenshots/demo.mp4
 
 # Temporary files
 *.tmp
 *.temp
 .codex-skill-build/
+.codex/
+.agents/
 
 # Next.js
 .next/
@@ -81,3 +92,17 @@ tsconfig.tsbuildinfo
 
 # Test caches
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+coverage.xml
+playwright-report/
+test-results/
+
+# Local service and deployment state
+*.pid
+*.pid.lock
+.turbo/
+.vercel/

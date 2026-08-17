@@ -4,12 +4,13 @@ import asyncio
 import json
 import time
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 import pandas as pd
 import pytest
 
 import api.services as services_module
+import api.main as main_module
 from api.main import (
     AgentMemoryStore,
     _attach_memory_profile,
@@ -28,7 +29,6 @@ from api.schemas import (
     HotspotItem,
     HotspotRelatedStock,
     GlobalNewsItem,
-    ModelOption,
     MarketRegimeResponse,
     NewsItem,
     PortfolioPosition,
@@ -47,10 +47,100 @@ from api.schemas import (
     UserSettingsResponse,
     WebSearchResult,
 )
-from api.agent_pydantic import AgentOutput, SYSTEM_PROMPT, build_agent_response
+from api.agent_pydantic import (
+    AgentOutput,
+    SYSTEM_PROMPT,
+    _is_greeting_query,
+    _is_generic_hotspot_request,
+    _profile_for_model,
+    _settings_for_model,
+    build_agent_response,
+)
+from api.supabase_config import SupabaseConfig
 
 
 client = TestClient(app)
+
+
+def _enable_hosted_beta_auth(monkeypatch, *, authenticated: bool) -> None:
+    config = SupabaseConfig(
+        url="https://project.supabase.co",
+        anon_key="publishable-test-key",
+        require_auth=True,
+    )
+    monkeypatch.setattr(main_module, "supabase_config", config)
+    monkeypatch.setattr(main_module, "credit_service", main_module.CreditService(config))
+
+    if authenticated:
+        monkeypatch.setattr(
+            main_module,
+            "require_supabase_user",
+            lambda _request, _config: SimpleNamespace(id="test-user", access_token="test-token"),
+        )
+    else:
+        def reject(_request, _config):
+            raise HTTPException(status_code=401, detail="需要 Supabase 登录令牌。")
+
+        monkeypatch.setattr(main_module, "require_supabase_user", reject)
+
+
+def test_hosted_beta_rejects_unauthenticated_api_requests(monkeypatch):
+    _enable_hosted_beta_auth(monkeypatch, authenticated=False)
+
+    response = client.get("/api/news/global")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "需要 Supabase 登录令牌。"
+
+
+def test_hosted_beta_keeps_health_check_public(monkeypatch):
+    _enable_hosted_beta_auth(monkeypatch, authenticated=False)
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_hosted_beta_blocks_shared_model_settings_updates(monkeypatch):
+    _enable_hosted_beta_auth(monkeypatch, authenticated=True)
+
+    response = client.put("/api/settings", json={"llm_base_url": "https://example.invalid"})
+
+    assert response.status_code == 403
+    assert "平台管理" in response.json()["detail"]
+
+
+def test_workspace_bootstrap_keeps_local_fallback_without_supabase(monkeypatch):
+    monkeypatch.setattr(main_module, "supabase_config", SupabaseConfig())
+
+    response = client.get("/api/workspace/bootstrap")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "storage": "local",
+        "user_id": None,
+        "settings": None,
+        "watchlists": [],
+        "sessions": [],
+        "pinned_contexts": [],
+    }
+
+
+def test_billing_balance_keeps_local_mode_unlimited(monkeypatch):
+    monkeypatch.setattr(main_module, "supabase_config", SupabaseConfig())
+    monkeypatch.setattr(main_module, "credit_service", main_module.CreditService(SupabaseConfig()))
+
+    response = client.get("/api/billing/balance")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "balance": None,
+        "lifetime_granted": 0,
+        "lifetime_purchased": 0,
+        "lifetime_used": 0,
+        "unlimited": True,
+    }
 
 
 def _make_stock_analysis(code: str, name: str, score: int, signal: str, price: float, change_pct: float) -> StockAnalysisResponse:
@@ -97,6 +187,87 @@ def test_search_endpoint(monkeypatch):
     response = client.get("/api/stocks/search", params={"q": "招商银行"})
     assert response.status_code == 200
     assert response.json()[0]["code"] == "sh600036"
+
+
+def test_deepseek_profile_avoids_required_tool_choice(monkeypatch):
+    from openai import AsyncOpenAI
+    from pydantic_ai.providers.openai import OpenAIProvider
+
+    provider = OpenAIProvider(
+        openai_client=AsyncOpenAI(api_key="test-key", base_url="https://api.deepseek.com")
+    )
+    profile = _profile_for_model(provider, "deepseek-v4-flash", "https://api.deepseek.com")
+
+    assert profile.openai_supports_tool_choice_required is False
+    assert profile.openai_supports_strict_tool_definition is False
+    assert profile.openai_chat_thinking_field == "reasoning_content"
+    assert profile.openai_chat_send_back_thinking_parts == "field"
+
+    monkeypatch.delenv("LLM_THINKING_MODE", raising=False)
+    assert _settings_for_model("deepseek-v4-flash", "https://api.deepseek.com") == {
+        "extra_body": {"thinking": {"type": "disabled"}}
+    }
+
+
+def test_agent_query_stream_emits_result_before_done(monkeypatch):
+    async def fake_run_agent_request(*args, **kwargs):
+        return AgentResponse(intent="test", summary="测试回答", payload={})
+
+    monkeypatch.setattr("api.main._run_agent_request", fake_run_agent_request)
+    monkeypatch.setattr("api.main._persist_agent_turns", lambda *args, **kwargs: None)
+    monkeypatch.setattr("api.main._maybe_run_heartbeat", lambda *args, **kwargs: None)
+
+    with client.stream(
+        "POST",
+        "/api/agent/query/stream",
+        json={"query": "测试", "session_id": "sse-regression-test"},
+    ) as response:
+        assert response.status_code == 200
+        response.read()
+        body = response.text
+
+    event_names = [
+        line.removeprefix("event: ").strip()
+        for line in body.splitlines()
+        if line.startswith("event:")
+    ]
+    assert "result" in event_names
+    assert "done" in event_names
+    assert event_names.index("result") < event_names.index("done")
+
+
+def test_deterministic_agent_greeting_is_brief_and_tool_free():
+    response = agent_service.query("你好")
+
+    assert response.intent == "greeting"
+    assert "你好" in response.summary
+    assert len(response.summary) <= 180
+    assert response.payload["_meta"]["tools_used"] == []
+
+
+@pytest.mark.parametrize(
+    "query,expected_phrase",
+    [
+        ("这票怎么样？", "哪只股票"),
+        ("这个消息利好谁？", "哪条消息"),
+    ],
+)
+def test_deterministic_agent_clarifies_missing_object(query, expected_phrase):
+    response = agent_service.query(query)
+
+    assert response.intent == "clarification"
+    assert expected_phrase in response.summary
+    assert response.payload["_meta"]["tools_used"] == []
+
+
+def test_generic_hotspot_tool_policy_is_narrow():
+    assert _is_generic_hotspot_request("今天有什么热点？") is True
+    assert _is_generic_hotspot_request("科技板块为什么是热点？") is False
+
+
+def test_pure_greeting_is_fast_path_candidate():
+    assert _is_greeting_query("你好！") is True
+    assert _is_greeting_query("分析招商银行") is False
 
 
 def test_analysis_endpoint(monkeypatch):
@@ -235,40 +406,36 @@ def test_get_settings_endpoint(monkeypatch):
         "api.main.settings_store.get_settings",
         lambda: UserSettingsResponse(
             llm_model="deepseek-reasoner",
-            llm_model_source="user",
             llm_base_url="https://api.deepseek.com",
             llm_configured=True,
             updated_at="2026-03-12T10:00:00+00:00",
-            model_options=[
-                ModelOption(value="deepseek-chat", label="DeepSeek Chat"),
-                ModelOption(value="deepseek-reasoner", label="DeepSeek Reasoner"),
-            ],
         ),
     )
     response = client.get("/api/settings")
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_model"] == "deepseek-reasoner"
-    assert payload["model_options"][1]["value"] == "deepseek-reasoner"
+    assert payload["llm_model_source"] == "env"
+    assert "model_options" not in payload
 
 
 def test_update_settings_endpoint(monkeypatch):
     monkeypatch.setattr(
         "api.main.settings_store.update_settings",
-        lambda llm_model, llm_base_url=None, llm_api_key=None: UserSettingsResponse(
-            llm_model=llm_model,
-            llm_model_source="user",
+        lambda llm_base_url=None, llm_api_key=None: UserSettingsResponse(
+            llm_model="deepseek-reasoner",
             llm_base_url=llm_base_url or "https://api.deepseek.com",
             llm_configured=True,
             updated_at="2026-03-12T10:05:00+00:00",
-            model_options=[ModelOption(value=llm_model, label=llm_model)],
         ),
     )
-    response = client.put("/api/settings", json={"llm_model": "deepseek-reasoner"})
+    response = client.put("/api/settings", json={"llm_base_url": "https://api.deepseek.com"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["llm_model"] == "deepseek-reasoner"
-    assert payload["llm_model_source"] == "user"
+
+    rejected = client.put("/api/settings", json={"llm_model": "user-controlled-model"})
+    assert rejected.status_code == 422
 
 
 def test_news_endpoint(monkeypatch):
@@ -480,7 +647,6 @@ def test_strategy_holdings_endpoints(monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
     monkeypatch.setattr("api.main.strategy_service.list_holdings", lambda: [fixture_holding])
     monkeypatch.setattr("api.main.strategy_service.create_holding", lambda holding: fixture_holding)
     monkeypatch.setattr("api.main.strategy_service.analyze_holdings", lambda: fixture_analysis)
@@ -553,7 +719,6 @@ def test_degraded_strategy_scores_are_not_reusable(tmp_path):
 
 
 def test_portfolio_missing_mutations_return_404(monkeypatch):
-    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
 
     def raise_missing(*args, **kwargs):
         raise services_module.NotFoundError("Portfolio position 999 not found")
@@ -578,7 +743,6 @@ def test_portfolio_missing_mutations_return_404(monkeypatch):
 
 
 def test_strategy_holding_missing_mutations_return_404(monkeypatch):
-    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
 
     def raise_missing(*args, **kwargs):
         raise services_module.NotFoundError("Strategy holding 999 not found")
@@ -621,6 +785,14 @@ def test_market_regime_endpoint(monkeypatch):
     payload = response.json()
     assert payload["regime"] == "risk_on"
     assert payload["score"] == 74.5
+
+
+def test_market_regime_fallback_is_loading():
+    fallback = services_module.MarketService._build_market_regime_fallback()
+
+    assert fallback.is_loading is True
+    assert fallback.indices == []
+    assert "加载" in fallback.summary
 
 
 def test_strategy_holding_store_normalizes_exit_fields(tmp_path):
@@ -749,7 +921,6 @@ def test_strategy_holdings_analysis_keeps_saved_records_when_quote_fetch_fails(m
         quantity=900,
         status="holding",
     )
-    monkeypatch.setattr("api.main._require_demo_access", lambda request, feature_name: None)
     monkeypatch.setattr("api.main.strategy_service.store.list_holdings", lambda: [holding])
     monkeypatch.setattr(
         "api.main.strategy_service.market_service.get_market_regime",
@@ -1081,6 +1252,9 @@ def test_agent_query_uses_history_for_sector_comparison(monkeypatch):
 
 def test_agent_query_returns_candidates_for_low_confidence_stock_match(monkeypatch):
     agent_service._cache.clear()
+    # This test covers deterministic candidate selection, not the configured
+    # external model. Keep it isolated from a developer's local LLM settings.
+    monkeypatch.setattr("api.main._get_pydantic_agent", lambda: (None, None))
 
     def fake_search(query, max_results=10):
         return [
@@ -1095,7 +1269,9 @@ def test_agent_query_returns_candidates_for_low_confidence_stock_match(monkeypat
         ]
 
     monkeypatch.setattr("api.main.agent_service.stock_service.search_stocks", fake_search)
-    response = client.post("/api/agent/query", json={"query": "分析能吗", "session_id": "test-stock-candidates"})
+    # No session ID: persisted local memory from a prior test run must not
+    # turn this intentionally ambiguous query into a concrete stock target.
+    response = client.post("/api/agent/query", json={"query": "分析能吗"})
     assert response.status_code == 200
     payload = response.json()
     assert payload["intent"] == "stock_candidates"
@@ -1276,6 +1452,9 @@ def test_pydantic_system_prompt_includes_clarification_and_truthfulness_rules():
     assert "这票怎么样" in SYSTEM_PROMPT
     assert "这个消息利好谁" in SYSTEM_PROMPT
     assert "今天市场怎么看" in SYSTEM_PROMPT
+    assert "消息查询" in SYSTEM_PROMPT
+    assert "不要调用 get_stock_analysis" in SYSTEM_PROMPT
+    assert "不要套用技术分析模板" in SYSTEM_PROMPT
 
 
 def test_agent_memory_store_supports_pinned_memory_and_goal_state(tmp_path):

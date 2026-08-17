@@ -234,6 +234,7 @@ STOCK_NAME_ALIASES: Dict[str, str] = {
     "中国海洋石油": "中国海油",
     "中国石油天然气": "中国石油",
     "中国石油化工": "中国石化",
+    "长鑫存储": "长鑫科技",
 }
 
 MARKET_REGIME_INDEXES: List[Tuple[str, str]] = [
@@ -1612,11 +1613,12 @@ class MarketService:
     def _build_market_regime_fallback() -> MarketRegimeResponse:
         return MarketRegimeResponse(
             regime="neutral",
+            is_loading=True,
             score=50,
-            action_bias="指数数据正在后台刷新，先按中性环境处理。",
-            position_guidance="建议轻仓试错，单票控制在 10% 以内。",
-            summary="市场状态正在刷新中，页面先返回中性风控口径，避免行情源阻塞首屏。",
-            notes=["市场状态后台刷新中，避免激进加仓。"],
+            action_bias="指数数据正在加载，请稍候。",
+            position_guidance="",
+            summary="市场状态正在加载中，请稍候。",
+            notes=[],
             indices=[],
             updated_at=_now_utc(),
         )
@@ -3328,6 +3330,30 @@ class AgentService:
                 },
             )
 
+        if rewrite.intent == "greeting":
+            return AgentResponse(
+                intent="greeting",
+                summary="你好！我可以帮你分析股票、新闻、热点或持仓。",
+                actions=["分析 sh600036", "查看今日热点", "分析我的持仓"],
+                citations=[],
+                payload={"_meta": self._meta_payload(tools_used, cache_hits, rewrite, slots)},
+            )
+
+        if rewrite.intent == "clarification":
+            if any(token in query for token in ["这个消息", "这个新闻", "这个利好"]):
+                summary = "你指的是哪条消息或哪个主题？贴出标题、链接或关键词即可。"
+                actions = ["贴出新闻标题", "提供相关股票或主题", "指定时间范围"]
+            else:
+                summary = "你指的是哪只股票？请提供股票代码或名称即可。"
+                actions = ["例如：sh600036", "例如：招商银行", "也可以直接贴出股票代码"]
+            return AgentResponse(
+                intent="clarification",
+                summary=summary,
+                actions=actions,
+                citations=[],
+                payload={"_meta": self._meta_payload(tools_used, cache_hits, rewrite, slots)},
+            )
+
         if rewrite.intent == "help":
             return AgentResponse(
                 intent="help",
@@ -3799,7 +3825,11 @@ class AgentService:
             token in query for token in ["那", "这只", "这家", "它", "刚才", "继续", "再看", "再比较", "消息面", "同板块"]
         )
         wants_live_web = any(
-            token in lower_query for token in ["latest", "breaking", "search", "实时", "最新", "刚刚", "突发", "联网"]
+            token in lower_query
+            for token in [
+                "latest", "breaking", "search", "实时", "最新", "刚刚", "突发", "联网",
+                "未来", "前景", "现状", "上市", "公告",
+            ]
         )
         include_context = any(token in query for token in ["世界", "全球", "宏观", "局势", "国际", "科技大事", "伊朗", "油价"])
         if any(token in lower_query for token in ["model", "llm"]) or any(
@@ -3808,6 +3838,28 @@ class AgentService:
             return IntentRewriteResult(
                 intent="model_info",
                 rewritten_query="查看当前模型配置",
+                target_stock=None,
+                wants_live_web=False,
+                include_context=False,
+                follow_up=False,
+            )
+        if any(token in lower_query for token in ["hello", "hi"]) or any(
+            token in query for token in ["你好", "您好", "嗨", "哈喽", "谢谢", "感谢"]
+        ):
+            return IntentRewriteResult(
+                intent="greeting",
+                rewritten_query="问候并简要介绍可用能力",
+                target_stock=None,
+                wants_live_web=False,
+                include_context=False,
+                follow_up=False,
+            )
+        if not target_hint and any(
+            token in query for token in ["这票", "这只股票", "能不能上车", "要不要减仓", "这个消息", "这个新闻", "这个利好"]
+        ):
+            return IntentRewriteResult(
+                intent="clarification",
+                rewritten_query="澄清股票或消息对象",
                 target_stock=None,
                 wants_live_web=False,
                 include_context=False,

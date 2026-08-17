@@ -16,6 +16,7 @@ type CandlestickChartProps = {
   data: ChartPoint[];
   height?: number;
   symbol?: string;
+  compact?: boolean;
 };
 
 function toChartTime(dateStr: string): string {
@@ -23,7 +24,7 @@ function toChartTime(dateStr: string): string {
   return d; // YYYY-MM-DD
 }
 
-export function CandlestickChart({ data, height = 400, symbol = "" }: CandlestickChartProps) {
+export function CandlestickChart({ data, height = 400, symbol = "", compact = false }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -39,17 +40,21 @@ export function CandlestickChart({ data, height = 400, symbol = "" }: Candlestic
 
     const chart = createChart(containerRef.current, {
       layout: { background: { color: "#ffffff" }, textColor: "#0d0d0d" },
-      grid: { vertLines: { color: "rgba(0,0,0,0.06)" }, horzLines: { color: "rgba(0,0,0,0.06)" } },
+      grid: {
+        vertLines: { color: compact ? "rgba(0,0,0,0.025)" : "rgba(0,0,0,0.06)" },
+        horzLines: { color: compact ? "rgba(0,0,0,0.035)" : "rgba(0,0,0,0.06)" },
+      },
       width: containerRef.current.clientWidth,
       height,
       timeScale: {
-        borderColor: "rgba(0,0,0,0.08)",
-        timeVisible: true,
+        borderColor: compact ? "transparent" : "rgba(0,0,0,0.08)",
+        timeVisible: !compact,
         secondsVisible: false,
-        rightOffset: 8,
+        // A large offset leaves most of a short series empty on full-size charts.
+        rightOffset: compact ? 8 : 2,
         barSpacing: 8,
       },
-      rightPriceScale: { borderColor: "rgba(0,0,0,0.08)" },
+      rightPriceScale: { borderColor: compact ? "transparent" : "rgba(0,0,0,0.08)", visible: !compact },
       handleScroll: {
         mouseWheel: false,
         pressedMouseMove: true,
@@ -99,7 +104,7 @@ export function CandlestickChart({ data, height = 400, symbol = "" }: Candlestic
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [data, height]);
+  }, [compact, data, height]);
 
   return (
     <div className="candlestick-wrap" style={{ width: "100%", minHeight: height }}>
