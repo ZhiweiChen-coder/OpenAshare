@@ -132,7 +132,7 @@ export function SupabaseAuthPanel({ placement = "header", onAuthChange }: Supaba
           <div className="workspace-auth-profile-status">
             <span className="workspace-auth-state-dot" aria-hidden="true" />
             <span>
-              <strong>云端已连接</strong>
+              <strong>已登录</strong>
               <small title={user.email ?? undefined}>{user.email ?? "已登录"}</small>
             </span>
           </div>

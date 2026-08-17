@@ -22,6 +22,7 @@ import type { SupabaseWorkspaceBootstrap, WorkspaceEvent } from "./workspace";
 import { createClient } from "@/utils/supabase/client";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const HOSTED_API_ORIGIN = "https://api.openashare.com";
 
 /**
  * Server Components / RSC run in Node: relative fetch("/api/...") does not hit FastAPI.
@@ -29,6 +30,15 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
  */
 function apiBaseUrl(): string {
   if (typeof window !== "undefined") {
+    // Vercel's public routing layer does not preserve a browser Authorization
+    // header when it proxies to our FastAPI origin. Hosted authenticated calls
+    // therefore need to go directly to the API origin; CORS is configured for
+    // the official site. Keep local development and preview deployments on the
+    // same-origin Next proxy so their existing setup continues to work.
+    const hostname = window.location.hostname.toLowerCase();
+    if (hostname === "openashare.com" || hostname === "www.openashare.com") {
+      return HOSTED_API_ORIGIN;
+    }
     return "";
   }
   const serverBase =
