@@ -333,16 +333,6 @@ def _load_cors_origin_regex() -> str:
     return value
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_load_cors_origins(),
-    allow_origin_regex=_load_cors_origin_regex() or None,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 @app.middleware("http")
 async def enforce_hosted_beta_access(request: Request, call_next):
     """Require a Supabase JWT for every hosted workspace API request.
@@ -388,6 +378,19 @@ async def enforce_hosted_beta_access(request: Request, call_next):
             headers={"Retry-After": str(retry_after)},
         )
     return await call_next(request)
+
+
+# Register CORS after the hosted access middleware so it remains the outermost
+# layer. Browser clients must receive CORS headers on an early 401 response
+# instead of seeing a misleading network error.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_load_cors_origins(),
+    allow_origin_regex=_load_cors_origin_regex() or None,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(Exception)

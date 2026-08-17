@@ -93,6 +93,16 @@ def test_hosted_beta_rejects_unauthenticated_api_requests(monkeypatch):
     assert response.json()["detail"] == "需要 Supabase 登录令牌。"
 
 
+def test_hosted_beta_auth_error_keeps_cors_headers(monkeypatch):
+    _enable_hosted_beta_auth(monkeypatch, authenticated=False)
+
+    response = client.get("/api/news/global", headers={"Origin": "http://localhost:3000"})
+
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 def test_hosted_beta_keeps_health_check_public(monkeypatch):
     _enable_hosted_beta_auth(monkeypatch, authenticated=False)
 
