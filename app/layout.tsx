@@ -1,11 +1,7 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
+import { Suspense } from "react";
 
-import { AppShell, AppShellProvider, Nav } from "@/components/app-shell";
-import { DemoAccessDialog } from "@/components/demo-access-dialog";
-import { DemoAccessProvider } from "@/components/demo-access-provider";
-import { DEMO_ACCESS_COOKIE_NAME } from "@/lib/demo-access";
-import { getDemoAccessStatusFromToken } from "@/lib/demo-access-server";
+import { AppShell, AppShellProvider } from "@/components/app-shell";
 import "./tokens.css";
 import "./globals.css";
 
@@ -20,22 +16,16 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = await cookies();
-  const demoToken = cookieStore.get(DEMO_ACCESS_COOKIE_NAME)?.value;
-  const initialDemoAccess = getDemoAccessStatusFromToken(demoToken);
-
   return (
     <html lang="zh-CN">
       <body suppressHydrationWarning>
         <div className="shell">
           <div className="frame">
-            <AppShellProvider>
-              <DemoAccessProvider initialStatus={initialDemoAccess}>
-                <Nav />
-                <DemoAccessDialog />
+            <Suspense fallback={null}>
+              <AppShellProvider>
                 <AppShell>{children}</AppShell>
-              </DemoAccessProvider>
-            </AppShellProvider>
+              </AppShellProvider>
+            </Suspense>
           </div>
         </div>
       </body>

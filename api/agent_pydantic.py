@@ -5,7 +5,9 @@ Used for stock analysis, news, hotspots, portfolio, and web search; wired to the
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+import os
+import re
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -14,12 +16,14 @@ from openai import AsyncOpenAI
 try:
     from pydantic_ai import Agent, RunContext
     from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
     from pydantic_ai.providers.openai import OpenAIProvider
     PYDANTIC_AI_AVAILABLE = True
 except ModuleNotFoundError:
     Agent = Any
     RunContext = Any
     OpenAIChatModel = None
+    OpenAIModelProfile = None
     OpenAIProvider = None
     PYDANTIC_AI_AVAILABLE = False
 
@@ -55,18 +59,30 @@ SYSTEM_PROMPT = """你是 Ashare Agent（中文输出）。目标：尽量少调
 
 ## 市场覆盖（重要）
 - 工具同时支持 A股、港股、美股。美股用中文名也能查（如 英伟达=US.NVDA、苹果=US.AAPL、特斯拉=US.TSLA、台积电=US.TSM）。
-- 不要说“我只聚焦A股”，也不要因为标的是美股/港股就拒绝分析或直接降级到联网搜索。先 search_stocks→get_stock_analysis 拿真实行情和信号；只有工具确实返回失败/无数据时，才说明拿不到并可选联网补充。
+- 不要说“我只聚焦A股”，也不要因为标的是美股/港股就拒绝分析或直接降级到联网搜索。需要行情或技术判断时先 search_stocks→get_stock_analysis；需要消息时按消息查询规则调用 get_stock_news。
 
 ## 工具使用策略（智能、少而准）
 - 只有在需要数据时才调用工具；避免为了“看起来更全”而把所有工具都跑一遍。
-- 问候/闲聊（如“你好”）不要调用任何工具，直接一句欢迎+可选示例即可。
-- 单股（含美股/港股）：先 search_stocks→get_stock_analysis。
-  - 默认【不要】调 get_stock_news；只有用户句子里出现“消息/新闻/公告/最新/动态/利好/利空”等词时才调。
+- 先判断用户真正要的动作，再选择最少的工具；不要因为提到了股票就默认调用 get_stock_analysis。
+- 涉及具体股票名称或代码时，先调用 search_stocks 核验目标；模型记忆不能覆盖工具返回的数据。
+- “最近消息 / 最新消息 / 新闻 / 公告 / 动态 / 消息面”是【消息查询】意图：search_stocks → get_stock_news。除非用户同时问现价、技术面、信号、评分、走势或买卖，否则不要调用 get_stock_analysis，也不要套用技术分析模板。
+- “现价 / 技术面 / 信号 / 评分 / 走势 / 能不能上车”是【技术分析】意图：search_stocks → get_stock_analysis；只有用户明确要求消息或驱动因素时才补充 get_stock_news。
+- “为什么走强 / 为什么下跌 / 驱动因素”需要结合上下文判断；要解释消息驱动时才调用 get_stock_news，不要机械调用所有工具。
+- 只有用户明确同时要求行情和消息，才同时调用行情与消息工具。
+- 如果用户问“最近/最新/消息/公告”等但工具没有结果，要明确说没有查到，不要用训练记忆补齐。
+- 如果工具返回的名称、代码、市场与模型记忆冲突，以工具返回为准，并在回答中说明“已通过实时工具核验”。
+- 已核验某只股票后，只讨论工具返回的名称、代码和市场；不要自行把简称、品牌名或关联公司扩展成另一家公司，也不要补充另一主体的“已上市/未上市”结论，除非同一轮工具明确返回了该主体。
+- 问候/闲聊（如“你好”）不要调用任何工具，只回复一两句欢迎语；可以给出最多 3 个示例，但不要反问“你想分析哪只”等澄清问题，也不要把示例写成问题。
+- 单股（含美股/港股）：按上面的意图分流；消息查询走 search_stocks→get_stock_news，技术分析走 search_stocks→get_stock_analysis。
+  - 不要因为“单股”这个对象类型就同时调用行情和新闻工具。
   - 单股提问【禁止】调用 get_global_news / list_hotspots（它们只返回泛泛的全球头条/热点，与个股无关，会让回答跑题变长）。除非用户明确说“最新消息/联网/搜一下”，否则也不要对单股用 web_search。
 - 世界/宏观/突发：以 get_global_news 为主，通常一个工具就够。
   - 【不要】同一次又叠加 web_search / get_hotspot_detail；只有用户明确点名某主题或要求“联网/搜一下”时才追加，且最多再加 1 个工具。
-- 热点：list_hotspots；用户点名某主题才 get_hotspot_detail。
+- 热点：一般问“今天有什么热点/当前热点”时只调用一次 list_hotspots，并直接整理结果；不要调用 get_hotspot_detail 或 web_search。只有用户点名某个具体主题，才调用 get_hotspot_detail；只有用户明确要求联网，才追加 web_search。
 - 持仓：get_portfolio_analysis。
+
+## 结果使用
+- 工具结果必须在最终回答中点名对应股票或主题，并引用实际返回的结果；不要只说“已查询”。
 
 ## 澄清优先级
 - 用户说“这票怎么样”“能不能上车”“要不要减仓”但没点名股票时：先问股票名称或代码。
@@ -103,8 +119,14 @@ SYSTEM_PROMPT = """你是 Ashare Agent（中文输出）。目标：尽量少调
 - summary 必须是 markdown，并用 2~4 个 '## 标题' 分段（每段就是一个 topic card）。
 - 每个段落最多 4 行；每行尽量短；总字数尽量 < 450 字。
 - 不要输出超长原文，不要贴大段新闻全文；新闻只给“标题+一句影响”。
-- 对单股要包含：价格/信号评分/1-2 条关键结论/一个风险点。
+- 消息查询只输出：实际新闻标题、时间/来源、基于新闻内容的影响解读；不要擅自加入现价、信号评分或“追高需谨慎”的技术模板。若只有资金流、龙虎榜等市场数据，要明确称为资金/交易数据，不要包装成公司新闻或基本面催化。
+- 技术分析才包含：价格/信号评分/1-2 条关键结论/一个风险点。
 - actions 给 1~3 条下一步问题（短句）。
+
+## 意图示例（优先级高于通用模板）
+- 用户：“看看海光信息最近消息” → 这是消息查询，只调用股票搜索和个股新闻；回答新闻标题与影响，不要输出现价、技术信号或“追高需谨慎”的技术模板。
+- 用户：“分析海光信息走势” → 这是技术分析，调用股票搜索和行情分析。
+- 用户：“海光信息最近消息和走势怎么样” → 用户明确同时要消息和走势，才调用新闻与行情分析。
 """
 
 
@@ -119,6 +141,7 @@ class AgentDeps:
     web_search_service: WebSearchService
     tool_results: List[Dict[str, Any]] = field(default_factory=list)
     progress_callback: Optional[ProgressCallback] = None
+    user_query: str = ""
 
     def report(self, stage: str, progress_pct: int, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
         if self.progress_callback:
@@ -144,6 +167,36 @@ def _format_web_result_for_agent(item: Any) -> str:
     return title
 
 
+def _format_stock_news_for_agent(item: Any) -> str:
+    """Expose enough structured news context for the model to interpret it."""
+
+    title = str(getattr(item, "title", "") or "").strip()
+    source = str(getattr(item, "source", "") or "").strip()
+    published_at = str(getattr(item, "published_at", "") or "").strip()
+    summary = re.sub(r"\s+", " ", str(getattr(item, "summary", "") or "").strip())
+    summary = re.sub(r"\s*([，。！？；：])\s*", r"\1", summary)
+    metadata = " · ".join(value for value in [published_at[:16], source] if value)
+    detail = f"：{summary[:160]}" if summary and summary != title else ""
+    return f"- {title}{f'（{metadata}）' if metadata else ''}{detail}"
+
+
+def _is_generic_hotspot_request(query: str) -> bool:
+    """Return whether a query only asks for the generic current hotspot list."""
+
+    text = (query or "").strip().lower()
+    if not any(token in text for token in ("热点", "市场焦点", "市场主线")):
+        return False
+    specific_markers = ("具体", "主题", "板块", "专题", "为什么", "影响", "联网", "新闻", "消息")
+    return not any(marker in text for marker in specific_markers)
+
+
+def _is_greeting_query(query: str) -> bool:
+    """Return whether a query is a pure greeting/thanks fast-path."""
+
+    text = (query or "").strip().lower().rstrip("!！。.,，")
+    return text in {"你好", "您好", "嗨", "哈喽", "hello", "hi", "谢谢", "感谢"}
+
+
 def create_agent(
     *,
     api_key: Optional[str] = None,
@@ -151,7 +204,6 @@ def create_agent(
     model: str = "deepseek-chat",
 ) -> Agent[AgentDeps, AgentOutput]:
     """Build the PydanticAI agent with tools. Use env vars if api_key/base_url/model not passed."""
-    import os
     if not PYDANTIC_AI_AVAILABLE:
         raise RuntimeError("pydantic_ai is not installed")
     key = api_key or os.environ.get("LLM_API_KEY")
@@ -161,7 +213,12 @@ def create_agent(
         raise ValueError("LLM_API_KEY (or api_key) is required for PydanticAI agent")
     client = AsyncOpenAI(api_key=key, base_url=url)
     provider = OpenAIProvider(openai_client=client)
-    chat_model = OpenAIChatModel(model_name, provider=provider)
+    chat_model = OpenAIChatModel(
+        model_name,
+        provider=provider,
+        profile=_profile_for_model(provider, model_name, url),
+        settings=_settings_for_model(model_name, url),
+    )
 
     agent = Agent(
         chat_model,
@@ -220,7 +277,8 @@ def create_agent(
             deps.report("tool_completed", 58, "个股消息已获取完成", {"tool": "get_stock_news"})
             if not items:
                 return f"No news for {stock_code}."
-            return f"Found {len(items)} news items. Latest: {items[0].title}"
+            news_lines = "\n".join(_format_stock_news_for_agent(item) for item in items[:6])
+            return f"Found {len(items)} news items for {stock_code}:\n{news_lines}"
         except Exception as e:
             return f"Stock news failed: {e}"
 
@@ -228,6 +286,8 @@ def create_agent(
     async def get_global_news(ctx: RunContext[AgentDeps], limit: int = 15) -> str:
         """Get global/macro news (finance, tech, geopolitics)."""
         deps = ctx.deps
+        if _is_generic_hotspot_request(deps.user_query):
+            return "Generic hotspot request: use list_hotspots only."
         try:
             limit = _bounded_limit(limit, default=10, maximum=10)
             deps.report("tool_running", 40, "正在获取全球新闻摘要", {"tool": "get_global_news"})
@@ -264,6 +324,8 @@ def create_agent(
     async def web_search(ctx: RunContext[AgentDeps], query: str, limit: int = 8) -> str:
         """Search the web for latest news/articles (e.g. OpenAI, Iran, Fed)."""
         deps = ctx.deps
+        if _is_generic_hotspot_request(deps.user_query):
+            return "Generic hotspot request: web search is not needed."
         try:
             limit = _bounded_limit(limit, default=3, maximum=3)
             deps.report("tool_running", 45, "正在联网检索网页结果", {"tool": "web_search"})
@@ -299,6 +361,8 @@ def create_agent(
     async def get_hotspot_detail(ctx: RunContext[AgentDeps], topic_name: str) -> str:
         """Get detail for a hotspot topic (related news and stocks)."""
         deps = ctx.deps
+        if _is_generic_hotspot_request(deps.user_query):
+            return "Generic hotspot request: use list_hotspots only."
         try:
             deps.report("tool_running", 40, "正在获取热点详情", {"tool": "get_hotspot_detail"})
             detail = await asyncio.to_thread(
@@ -317,6 +381,44 @@ def create_agent(
             return f"Hotspot detail failed: {e}"
 
     return agent
+
+
+def _is_deepseek_model(model_name: str, base_url: str) -> bool:
+    normalized_model = model_name.strip().lower()
+    normalized_url = base_url.strip().lower()
+    return normalized_model.startswith("deepseek-") or "deepseek.com" in normalized_url
+
+
+def _profile_for_model(provider: OpenAIProvider, model_name: str, base_url: str):
+    """Apply compatibility flags for OpenAI-compatible providers.
+
+    DeepSeek V4 thinking mode supports function tools, but rejects the explicit
+    ``tool_choice=required`` parameter. PydanticAI uses that value when the
+    structured output tool is mandatory, so make it use ``auto`` instead. DeepSeek
+    also only supports strict tool definitions on its beta endpoint.
+    """
+    if not _is_deepseek_model(model_name, base_url) or OpenAIModelProfile is None:
+        return None
+
+    base_profile = OpenAIModelProfile.from_profile(provider.model_profile(model_name))
+    return replace(
+        base_profile,
+        openai_supports_tool_choice_required=False,
+        openai_supports_strict_tool_definition=False,
+        openai_chat_thinking_field="reasoning_content",
+        openai_chat_send_back_thinking_parts="field",
+    )
+
+
+def _settings_for_model(model_name: str, base_url: str) -> Optional[Dict[str, Any]]:
+    """Return provider-specific request settings without affecting other models."""
+    if not _is_deepseek_model(model_name, base_url):
+        return None
+
+    thinking_mode = os.environ.get("LLM_THINKING_MODE", "disabled").strip().lower()
+    if thinking_mode not in {"enabled", "disabled"}:
+        thinking_mode = "disabled"
+    return {"extra_body": {"thinking": {"type": thinking_mode}}}
 
 
 def build_agent_response(
@@ -418,6 +520,18 @@ async def run_agent_async(
     """Run the agent and return the chat response."""
     deps.tool_results.clear()
     deps.progress_callback = progress_callback
+    deps.user_query = user_query
+    if _is_greeting_query(user_query):
+        deps.report("compose_response", 85, "正在整理简短欢迎语")
+        return AgentResponse(
+            intent="greeting",
+            summary="你好！我是 Ashare，可以帮你查 A股、港股、美股行情、新闻和市场热点。",
+            actions=["分析 sh600036", "查看今日热点", "分析我的持仓"],
+            citations=[],
+            payload={"_meta": {"tools_used": [], "cache_hits": []}},
+        )
+    # Tool choice belongs to the agent: do not automatically bundle search,
+    # quote, and news for every stock question.
     result = await agent.run(user_query.strip(), deps=deps)
     if result.output is None:
         return AgentResponse(
@@ -428,7 +542,8 @@ async def run_agent_async(
             payload={},
         )
     deps.report("compose_response", 85, "正在整理最终回答")
-    return build_agent_response(result.output, deps.tool_results)
+    response = build_agent_response(result.output, deps.tool_results)
+    return response
 
 
 def run_agent_sync(

@@ -1,87 +1,83 @@
 # OpenAshare
 
 <p align="center">
-  <a href="README.md">中文</a>
-  ·
-  <a href="README.en.md"><strong>English</strong></a>
-</p>
-
-> A local-first, self-hostable AI research workstation for China's A-share market.
-
-<p align="center">
-  <img src="public/home-en.png" alt="OpenAshare English workbench preview" width="920" />
+  <a href="README.md">中文</a> · <a href="README.en.md"><strong>English</strong></a>
 </p>
 
 <p align="center">
-  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5-000000?logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
-  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&logoColor=white" alt="FastAPI" /></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white" alt="Python" /></a>
-  <img src="https://img.shields.io/badge/AI%20Agent-Research%20Assistant-111827" alt="AI Agent" />
-  <img src="https://img.shields.io/badge/Local%20First-Self--hostable-2563eb" alt="Local First" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-16a34a" alt="License" /></a>
+  <strong>An AI research desk for China and Hong Kong equities.</strong><br />
+  Move from market context and technicals to an agent that remembers the question.
 </p>
 
-OpenAshare is not just another market dashboard. It is a research desk built for the daily workflow of A-share investors, builders, and self-hosting enthusiasts.
+<p align="center">
+  <a href="https://github.com/ZhiweiChen-coder/OpenAshare/stargazers"><img src="https://img.shields.io/github/stars/ZhiweiChen-coder/OpenAshare?style=flat&amp;label=GitHub%20Stars&amp;color=0f766e" alt="GitHub Stars" /></a>
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-15.5-000000?logo=nextdotjs&amp;logoColor=white" alt="Next.js" /></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi&amp;logoColor=white" alt="FastAPI" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&amp;logoColor=white" alt="Python" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-16a34a" alt="MIT License" /></a>
+</p>
 
-It brings single-stock technical analysis, market news, sector hotspots, portfolio review, strategy observation, and agent chat into one connected research loop. Start from a stock code and move through price action, indicators, news, and AI commentary. Start from a hotspot and trace it back to representative stocks. Ask the agent follow-up questions with portfolio context still nearby.
+<p align="center">
+  <img src="assets/screenshots/agent-research-beta.png" alt="OpenAshare agent research desk with retained research context" width="960" />
+</p>
 
-It is also not a black box. You can run it locally, self-host it, connect DeepSeek, OpenAI-compatible APIs, or a local model gateway, and reshape the workspace around your own research habits.
+> **The hosted Beta is opening.** Visit the product home, sign in, and request access to the cloud workspace — or run this repository locally and keep control of your data and model setup.
 
-> Disclaimer: This project is for research, learning, and tool-building only. It is not investment advice. Markets involve risk, and all decisions are your own responsibility.
+OpenAshare is not another market dashboard. It connects technical analysis, market news, sector themes, portfolio review, strategy tracking, and agent chat into one research loop. Start with a ticker and move through price action, indicators, news, and an AI explanation you can keep questioning. Start with a market theme and trace it back to representative equities and your portfolio context.
+
+It is local-first and self-hostable by design. The product is being built in Chinese and English for overseas Chinese investors and international researchers who want a clearer way into China and Hong Kong equity research.
+
+> Disclaimer: this project is for research, learning, and tool-building only. It is not investment advice. Markets involve risk; all decisions remain your own.
+
+## Star growth
+
+<p align="center">
+  <a href="https://star-history.com/#ZhiweiChen-coder/OpenAshare&amp;Date">
+    <img src="https://api.star-history.com/svg?repos=ZhiweiChen-coder/OpenAshare&amp;type=Date" alt="OpenAshare GitHub Star growth chart" width="720" />
+  </a>
+</p>
+
+The chart is supplied by [Star History](https://star-history.com/#ZhiweiChen-coder/OpenAshare&Date) and refreshes with public Star data. Select it for the interactive history.
 
 ## Why OpenAshare
 
-A-share research is often fragmented: prices in one app, news in another, holdings in a spreadsheet, charts somewhere else, and AI chat in a separate window. The information exists, but the context breaks.
+China equity research is often fragmented: prices in one app, news in another, holdings in a spreadsheet, charts somewhere else, and AI chat in a separate window. The information is there; the context is not.
 
-OpenAshare turns that fragmented process into a controllable workspace:
+- **One path from question to judgment**: market data, technical indicators, news, themes, and portfolio context can lead into each other without repeatedly pasting context.
+- **Agent-assisted, not black-box**: use AI to summarize, connect, explain, and follow up while keeping the underlying data and indicators visible.
+- **China / Hong Kong equity context**: built around the A-share workflow, with Hong Kong ticker support and an English entry point for global researchers.
+- **Local-first and model-flexible**: connect DeepSeek, an OpenAI-compatible API, or a local model gateway; suitable for personal research, private deployment, and extension.
 
-- **Designed around the A-share workflow**: stocks, sector themes, announcements, portfolio context, strategy candidates, and market rhythm are first-class paths.
-- **AI that supports research instead of replacing judgment**: the agent can summarize, connect, explain, and ask better follow-up questions while the interface keeps data and indicators visible.
-- **Local-first and self-hostable**: settings, holdings, and parts of the research state stay close to your own environment, making it useful for personal research, internal demos, and private deployment.
-- **Bring your own model**: switch providers through environment variables or the settings page instead of locking the research loop to one AI platform.
-- **Clean full-stack boundaries**: FastAPI handles analysis and orchestration; Next.js handles the product experience; the codebase is ready to extend.
+## Product preview
 
-## Preview
+| Agent research desk | Charts and technical context |
+| --- | --- |
+| ![Agent research desk](assets/screenshots/agent-research-beta.png) | ![OpenAshare chart workspace](public/marketing/openashare-beta-chart.png) |
 
-| Workbench | News Flow | Single-Stock Analysis |
-| --- | --- | --- |
-| ![OpenAshare workbench](public/home-en.png) | ![OpenAshare news page](assets/screenshots/news.png) | ![OpenAshare single stock page](assets/screenshots/single-stock.png) |
+### Research desk and agent
 
-## Core Features
+- Search by stock name or code; keep market snapshots, technical indicators, and AI insights together.
+- Ask research questions from any page while retaining conversation context and tool progress.
+- Call stock, theme, news, and portfolio services; fall back to rule-based analysis if the model is unavailable.
+- Work with prompts shaped for pre-market, live session, midday review, and post-market review.
 
-### Research Workbench
+### Market context, themes, and charts
 
-- Search by stock name or code
-- View market snapshots, technical indicators, and AI insights together
-- Track analysis progress with frontend event feedback
-- Follow market rhythm across pre-market, live session, midday review, and post-market review
+- Unified A-share, Hong Kong, and US equity search; A-share research uses Ashare / AkShare and Hong Kong tickers include formats such as `00700.HK`.
+- Stock news, market updates, themed hotspots, heat scores, and related equities.
+- Candlesticks, technical indicators, signals, and risk-on / neutral / risk-off context.
 
-### News and Hotspots
+### Portfolio and strategy
 
-- Browse stock-specific and market-wide news
-- Aggregate market themes with heat scores and related stocks
-- Drill into hotspot details, related catalysts, and historical heat
-- Use market regime context for risk-on / neutral / risk-off interpretation
-
-### Portfolio and Strategy
-
-- Maintain local holdings, cost basis, and position sizes
-- Review portfolio P&L, concentration risk, and rebalance suggestions
-- Track strategy candidates and watchlists
-- Review strategy holdings with status and action prompts
-
-### Agent Chat
-
-- Use one research chat entry across pages
-- Let the agent call stock, hotspot, news, and portfolio services
-- Keep conversation context and tool progress visible
-- Fall back to rule-based analysis when the AI engine is unavailable
+- Local holdings, cost basis, and position size management.
+- Portfolio P&L, concentration-risk review, rebalance suggestions, and watchlists.
+- Strategy candidate screens, state tracking, and review prompts.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  User["Researcher / Review workflow"] --> UI["Next.js App Router"]
+  User["Researcher / review workflow"] --> UI["Next.js App Router"]
   UI --> API["FastAPI service layer"]
   API --> Stock["Stock analysis service"]
   API --> News["News and hotspot service"]
@@ -92,15 +88,15 @@ flowchart LR
   Agent --> LLM["OpenAI-compatible LLM"]
 ```
 
-## Tech Stack
+## Tech stack
 
 - **Frontend**: Next.js App Router, React 19, TypeScript, lightweight-charts
 - **Backend**: FastAPI, Pydantic, SSE progress events
-- **Data & Analysis**: AkShare, pandas, custom technical analysis and strategy services
-- **Storage**: SQLite, local JSON settings
+- **Data & analysis**: AkShare, pandas, custom technical-analysis and strategy services
+- **Storage**: SQLite and local JSON settings
 - **AI**: OpenAI-compatible API with configurable base URL, model, and API key
 
-## Quick Start
+## Run locally
 
 ### Requirements
 
@@ -108,68 +104,73 @@ flowchart LR
 - Node.js 20+
 - npm
 
-### 1. Install backend dependencies
+### 1. Install dependencies
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements_api.txt
+npm install
 ```
 
-If you need the legacy analysis flow or extra local analysis modules, also install:
+Install the legacy analysis flow and extra local analysis modules only when needed:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Install frontend dependencies
+### 2. Configure a model (optional)
 
-```bash
-npm install
-```
-
-### 3. Configure environment variables
-
-Create `.env` in the project root:
+Create `.env` in the project root. Without a model configuration, selected agent capabilities fall back to rule-based analysis.
 
 ```env
 LLM_API_KEY=your_api_key
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
 MONITOR_DB_PATH=./data/monitor.db
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-Optional: configure an Eastmoney suggest token if you want online stock search autocomplete. Do not commit real tokens:
+Set `EASTMONEY_TOKEN` only when you need Eastmoney online stock-search autocomplete. Never commit a real token.
 
-```env
-EASTMONEY_TOKEN=your_eastmoney_suggest_token
-```
+### 3. Start the API and frontend
 
-Optional: configure a demo access code if you want to expose a public demo while protecting selected pages:
-
-```env
-DEMO_ACCESS_CODE=your_demo_code
-DEMO_ACCESS_SECRET=your_cookie_signing_secret
-```
-
-### 4. Start the API
+Use the default ports:
 
 ```bash
-./scripts/run_api.sh
+./scripts/run_api.sh      # http://127.0.0.1:8000
+npm run dev               # http://127.0.0.1:3000
 ```
 
-Default backend URL: `http://127.0.0.1:8000`
-
-### 5. Start the frontend
+If another service already uses `8000` / `3000`, run a parallel development instance:
 
 ```bash
-npm run dev
+API_PORT=8001 ./scripts/run_api.sh
 ```
 
-Default frontend URL: `http://127.0.0.1:3000`
+Then create `.env.local`:
 
-## Project Structure
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
+```
+
+Restart Next.js and run:
+
+```bash
+npm run dev -- -p 3001
+```
+
+## Pages
+
+- `/`: bilingual product home and hosted Beta entry
+- `/work`: main research desk and agent entry (`/agent` redirects here)
+- `/stocks`: stock search and single-stock analysis
+- `/charts`: candlestick charts and technical indicators
+- `/news`: market and stock news
+- `/hotspots`: themes and related equities
+- `/portfolio`: holdings, portfolio risk, and strategy review
+- `/settings`: model and service configuration
+
+## Project structure
 
 ```text
 .
@@ -180,53 +181,32 @@ Default frontend URL: `http://127.0.0.1:3000`
 ├── ashare/       # Analysis engine, market search, monitoring, and data modules
 ├── scripts/      # Local run scripts
 ├── tests/        # API and search tests
-└── assets/       # Screenshots, styles, report templates, and other assets
+└── assets/       # Product screenshots and other assets
 ```
 
-## Pages
-
-- `/`: product landing page with Chinese / English switching
-- `/work`: research workbench
-- `/stocks`: stock search and single-stock analysis
-- `/charts`: candlestick charts
-- `/news`: market news and stock news
-- `/hotspots`: market themes and related stocks
-- `/portfolio`: holdings, portfolio risk, and strategy review
-- `/agent`: agent research chat
-- `/settings`: model and service configuration
-
-## Validation
+## Verify
 
 ```bash
 python -m pytest tests/test_api_app.py -q
 npm run build
 ```
 
-## Who It Is For
+## Roadmap
 
-- Developers who want a private A-share research desk
-- Engineers exploring AI agents in real financial research workflows
-- Learners studying a FastAPI + Next.js full-stack project
-- Investors and researchers who want a local loop across holdings, news, hotspots, and strategy notes
-
-## Roadmap Ideas
-
-- More data source adapters and caching strategies
+- Login request and feedback loop for the hosted Beta
+- More China / Hong Kong data sources, caching, and citation tracing
 - Backtesting, trading calendars, and strategy performance panels
-- Finer-grained agent tool calls and citation tracing
-- Multi-user permissions, team sharing, and deployment templates
-- Broader test coverage and CI workflows
+- More granular agent tools, citations, and research memory
+- Team collaboration, permissions, and one-click deployment templates
 
 ## Contributing
 
-Issues, discussions, and pull requests are welcome. To keep the project healthy:
+Issues, discussions, and pull requests are welcome. Please:
 
-- Prefer small, focused changes
-- Keep `api/schemas.py` and `lib/types.ts` aligned when API contracts change
-- Never commit real API keys, private config, or machine-local files
-- Preserve the core product shape: stock analysis, news, hotspots, portfolio, strategy, and agent chat
-
-If OpenAshare is useful or sparks an idea, a GitHub Star helps more A-share builders discover it.
+- Prefer small, focused changes.
+- Keep `api/schemas.py` and `lib/types.ts` aligned when API contracts change.
+- Never commit real API keys, private configuration, or machine-local files.
+- Preserve the core product paths: stock analysis, news, hotspots, portfolio, strategy, and agent chat.
 
 ## License
 

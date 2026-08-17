@@ -1,0 +1,330 @@
+.panel {
+  --ink: #12100d;
+  --paper: #fffaf1;
+  --teal: #0f8a7b;
+  --coral: #be5b36;
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 860px);
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(18, 16, 13, 0.18);
+  border-radius: 11px;
+  background:
+    linear-gradient(135deg, rgba(18, 16, 13, 0.1), transparent 42%),
+    rgba(255, 255, 255, 0.74);
+  box-shadow: 0 32px 80px rgba(34, 31, 27, 0.2), 0 8px 16px rgba(34, 31, 27, 0.08);
+  transform: rotate(-1.4deg);
+}
+
+.panel::before,
+.panel::after {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+}
+
+.panel::before {
+  inset: 32px -22px 46px 14%;
+  border: 1px solid rgba(190, 91, 54, 0.38);
+  transform: rotate(3deg);
+}
+
+.panel::after {
+  top: 18%;
+  right: -38px;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(15, 138, 123, 0.38) 0 1px, transparent 1.5px);
+  background-size: 10px 10px;
+  opacity: 0.7;
+}
+
+.chromeBar,
+.statusBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.chromeBar {
+  min-height: 34px;
+  padding: 0 9px 0 5px;
+  border-radius: 7px 7px 0 0;
+  background: var(--ink);
+  color: rgba(255, 250, 241, 0.68);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.trafficLights {
+  display: flex;
+  gap: 5px;
+}
+
+.trafficLights span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #be5b36;
+}
+
+.trafficLights span:nth-child(2) {
+  background: #d29a4b;
+}
+
+.trafficLights span:nth-child(3) {
+  background: #0f8a7b;
+}
+
+.chromePath {
+  overflow: hidden;
+  flex: 1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.liveMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d6eee8;
+  white-space: nowrap;
+}
+
+.liveMark i,
+.signal {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 4px rgba(15, 138, 123, 0.14);
+}
+
+.viewport {
+  overflow: hidden;
+  border: 1px solid rgba(18, 16, 13, 0.18);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  background: #171714;
+}
+
+.mediaStage {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background:
+    linear-gradient(135deg, rgba(15, 138, 123, 0.2), transparent 36%),
+    linear-gradient(145deg, #2a3d3a, #111312 72%);
+}
+
+.video,
+.posterFallback,
+.screenshot {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video {
+  filter: brightness(1.12) saturate(1.04) contrast(0.98);
+}
+
+.screenshotStack {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #d9e0db;
+}
+
+.screenshot {
+  inset: 6% 4%;
+  width: 92%;
+  height: 88%;
+  border: 1px solid rgba(18, 16, 13, 0.18);
+  box-shadow: 0 16px 32px rgba(18, 16, 13, 0.28);
+  transform: rotate(-2.2deg) translate(-1%, 1%);
+}
+
+.screenshot:nth-child(2) {
+  transform: rotate(2.8deg) translate(2%, -1%);
+}
+
+.screenshot:nth-child(3) {
+  transform: rotate(-0.4deg);
+}
+
+.posterFallback {
+  opacity: 0.9;
+}
+
+.emptyFallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 8px;
+  padding: 10%;
+  color: var(--paper);
+  background:
+    linear-gradient(120deg, rgba(190, 91, 54, 0.2), transparent 42%),
+    linear-gradient(135deg, #163e39, #131513 70%);
+}
+
+.emptyFallback span {
+  color: #9bd2c7;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+}
+
+.emptyFallback strong {
+  max-width: 8ch;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 6vw, 4.6rem);
+  font-weight: 500;
+  line-height: 0.92;
+}
+
+.vignette,
+.grain,
+.scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.vignette {
+  background:
+    linear-gradient(180deg, rgba(18, 16, 13, 0.16), transparent 24%, transparent 72%, rgba(18, 16, 13, 0.5)),
+    linear-gradient(90deg, rgba(18, 16, 13, 0.3), transparent 20%, transparent 78%, rgba(18, 16, 13, 0.18));
+}
+
+.grain {
+  opacity: 0.11;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+  mix-blend-mode: screen;
+}
+
+.scanline {
+  background: linear-gradient(180deg, transparent 0 49%, rgba(255, 250, 241, 0.08) 50%, transparent 51%);
+  background-size: 100% 7px;
+  opacity: 0.22;
+}
+
+.signal {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--coral);
+  box-shadow: 0 0 0 4px rgba(190, 91, 54, 0.16);
+}
+
+.signalLive {
+  animation: signalPulse 1.8s ease-in-out infinite;
+}
+
+.overlayNote {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: grid;
+  gap: 5px;
+  color: var(--paper);
+  text-shadow: 0 2px 12px rgba(18, 16, 13, 0.4);
+}
+
+.overlayNote span {
+  color: #a9dfd5;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+}
+
+.overlayNote strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.15rem, 2.5vw, 1.8rem);
+  font-weight: 500;
+}
+
+.statusBar {
+  min-height: 28px;
+  padding: 0 8px;
+  color: rgba(255, 250, 241, 0.58);
+  background: var(--ink);
+  font-size: 0.54rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.statusBar span:last-child {
+  color: #9bd2c7;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes signalPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.62;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transform: none;
+  }
+
+  .signalLive {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .panel {
+    padding: 8px;
+    transform: none;
+  }
+
+  .chromePath {
+    font-size: 0.5rem;
+  }
+
+  .liveMark {
+    display: none;
+  }
+
+  .overlayNote {
+    left: 14px;
+    bottom: 14px;
+  }
+}

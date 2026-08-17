@@ -32,10 +32,7 @@ LLM_API_KEY=your_api_key_here
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-chat
 
-DEMO_ACCESS_CODE=your_demo_code
-DEMO_ACCESS_SECRET=your_demo_secret
-
-DATA_COUNT=180
+DATA_COUNT=1250
 MONITOR_DB_PATH=/opt/openashare/backend/data/monitor.db
 
 NEWS_TRACKING_ENABLED=true
@@ -59,7 +56,7 @@ CORS_ALLOWED_ORIGINS=https://openashare.com,https://www.openashare.com,https://y
 
 ```bash
 sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip build-essential nginx
+sudo apt install -y git python3 python3-venv python3-pip build-essential nginx certbot python3-certbot-nginx
 ```
 
 2. Clone the repository:
@@ -108,6 +105,8 @@ sudo systemctl status openashare-backend
 7. Install Nginx:
 
 ```bash
+# Replace api.openashare.com in the config if your API uses another domain.
+sudo certbot certonly --nginx -d api.openashare.com
 sudo cp deploy/oracle/openashare-nginx.conf /etc/nginx/conf.d/openashare.conf
 sudo nginx -t
 sudo systemctl enable nginx
@@ -128,3 +127,11 @@ Expected response:
 ```json
 {"status":"ok"}
 ```
+
+## Production gates
+
+- Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_REQUIRE_AUTH=true`. When enabled, every `/api/*` request except `/health` and `/healthz` requires a valid Supabase bearer token.
+- Keep `API_HOST=127.0.0.1`; do not expose Uvicorn port `8000` in the Oracle security list. Open only `80` for certificate issuance and `443` for the public API.
+- Nginx adds a coarse IP rate limit; the backend applies a second per-user limit through `CLOUD_RATE_LIMIT_*`.
+- The cloud API rejects `PUT /api/settings`; model credentials remain server-owned. Local development without Supabase keeps the local settings flow.
+- Run `chmod +x scripts/run_api_prod.sh` after cloning, or store the executable bit in Git, before enabling the systemd service.

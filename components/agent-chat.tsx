@@ -1,12 +1,18 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
-import { DemoAccessGate } from "@/components/demo-access-gate";
-import { useDemoAccess } from "@/components/demo-access-provider";
 import { StockPanelLink } from "@/components/stock-panel-link";
-import { queryAgent } from "@/lib/api";
+import { streamAgent } from "@/lib/api";
+import {
+  AGENT_LAB_RUN_EVENT,
+  compactHeadline,
+  contextFromAgentResponse,
+  type AgentLabTrace,
+  type ResearchContext,
+  type WorkspaceSessionSummary,
+} from "@/lib/workspace";
 import {
   AgentHistoryTurn,
   AgentResponse,
@@ -27,7 +33,7 @@ type Message = {
   response?: AgentResponse;
 };
 
-type ChatSession = {
+export type ChatSession = {
   id: string;
   title: string;
   pinned?: boolean;
@@ -40,7 +46,15 @@ const DEFAULT_PROMPTS = ["分析 sh600036", "看看海光信息最近消息", "�
 
 const STORAGE_KEY = "ashare-agent-sessions-v1";
 
-type AgentChatProps = { compact?: boolean };
+type AgentChatProps = {
+  compact?: boolean;
+  workspace?: boolean;
+  onSessionsChange?: (sessions: WorkspaceSessionSummary[]) => void;
+  onCurrentSessionChange?: (sessionId: string | null) => void;
+  onContextUpdate?: (context: ResearchContext) => void;
+  onLabTrace?: (trace: AgentLabTrace) => void;
+  onCreditUpdate?: (usage: { charged: number; remaining?: number | null; unlimited?: boolean }) => void;
+};
 type StreamState = "idle" | "connecting" | "streaming" | "completed" | "error";
 
 function createId(prefix: string) {
@@ -67,14 +81,19 @@ function createSession(title = "新对话"): ChatSession {
   };
 }
 
-export function AgentChat({ compact = false }: AgentChatProps) {
-  const { loaded, unlocked } = useDemoAccess();
+export function AgentChat({
+  compact = false,
+  workspace = false,
+  onSessionsChange,
+  onCurrentSessionChange,
+  onContextUpdate,
+  onLabTrace,
+  onCreditUpdate,
+}: AgentChatProps) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => [createSession()]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [isPending, startTransition] = useTransition();
   const [streamState, setStreamState] = useState<StreamState>("idle");
-  const [pendingQuery, setPendingQuery] = useState("");
   const [currentStageLabel, setCurrentStageLabel] = useState("等待输入");
   const [progressPct, setProgressPct] = useState(0);
   const [activeTool, setActiveTool] = useState<string | null>(null);
@@ -85,6 +104,7 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   const isComposingRef = useRef(false);
   const compactLogRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const askRef = useRef<(question: string) => void>(() => undefined);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -127,6 +147,71 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   }, [currentSessionId, sessions]);
 
   useEffect(() => {
+    onSessionsChange?.(
+      sessions.map(({ id, title, pinned, createdAt, updatedAt }) => ({
+        id,
+        title,
+        pinned,
+        createdAt,
+        updatedAt,
+      })),
+    );
+  }, [onSessionsChange, sessions]);
+
+  useEffect(() => {
+    onCurrentSessionChange?.(currentSessionId);
+  }, [currentSessionId, onCurrentSessionChange]);
+
+  useEffect(() => {
+    if (!workspace || typeof window === "undefined") {
+      return;
+    }
+    const handleSelectSession = (event: Event) => {
+      const customEvent = event as CustomEvent<string>;
+      if (customEvent.detail) {
+        setCurrentSessionId(customEvent.detail);
+        setHistoryOpen(false);
+      }
+    };
+    const handleNewSession = () => onNewChat();
+    const handleRenameSession = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; title?: string }>).detail;
+      const sessionId = detail?.sessionId;
+      const title = detail?.title?.trim();
+      if (!sessionId || !title) return;
+      setSessions((previous) =>
+        previous.map((session) =>
+          session.id === sessionId
+            ? { ...session, title, updatedAt: Date.now() }
+            : session,
+        ),
+      );
+    };
+    const handleDeleteSession = (event: Event) => {
+      const sessionId = (event as CustomEvent<string>).detail;
+      if (sessionId) onDeleteSession(sessionId);
+    };
+    const handleRunPrompt = (event: Event) => {
+      const prompt = (event as CustomEvent<string>).detail;
+      if (typeof prompt === "string" && prompt.trim()) {
+        askRef.current(prompt);
+      }
+    };
+    window.addEventListener("ashare:select-session", handleSelectSession);
+    window.addEventListener("ashare:new-session", handleNewSession);
+    window.addEventListener("ashare:rename-session", handleRenameSession);
+    window.addEventListener("ashare:delete-session", handleDeleteSession);
+    window.addEventListener(AGENT_LAB_RUN_EVENT, handleRunPrompt);
+    return () => {
+      window.removeEventListener("ashare:select-session", handleSelectSession);
+      window.removeEventListener("ashare:new-session", handleNewSession);
+      window.removeEventListener("ashare:rename-session", handleRenameSession);
+      window.removeEventListener("ashare:delete-session", handleDeleteSession);
+      window.removeEventListener(AGENT_LAB_RUN_EVENT, handleRunPrompt);
+    };
+  }, [workspace]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -139,9 +224,9 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   );
   const messages = currentSession?.messages ?? [];
   const visibleMessages = messages.slice(-40); // cap rendering to last 40 messages to avoid infinite scroll
-  const busy = isPending || streamState === "connecting" || streamState === "streaming";
-  const progressStages = useMemo(() => [currentStageLabel || "处理中"], [currentStageLabel]);
-  const progressStep = 0;
+  // A transition can remain pending while React renders the large response card.
+  // Only the transport state should keep the visible "正在研究" indicator on screen.
+  const busy = streamState === "connecting" || streamState === "streaming";
   const sortedSessions = useMemo(
     () =>
       [...sessions]
@@ -182,18 +267,6 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     }
   }, [busy]);
 
-  if (loaded && !unlocked) {
-    return (
-      <div className={compact ? "stack" : "panel section"}>
-        <DemoAccessGate
-          title="Agent 聊天已锁定"
-          description="解锁后可以使用统一问答、个股问答、持仓问答和消息追踪。"
-          compact={compact}
-        />
-      </div>
-    );
-  }
-
   function patchCurrentSession(updater: (session: ChatSession) => ChatSession) {
     setSessions((prev) =>
       prev.map((session) => {
@@ -223,6 +296,10 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   }
 
   function appendAgentResponse(response: AgentResponse) {
+    const nextContext = contextFromAgentResponse(response);
+    if (nextContext) {
+      onContextUpdate?.(nextContext);
+    }
     appendMessage({
       id: createId("msg"),
       role: "agent",
@@ -239,33 +316,78 @@ export function AgentChat({ compact = false }: AgentChatProps) {
       return;
     }
 
+    onLabTrace?.({
+      id: createId("lab"),
+      phase: "run_started",
+      query: trimmed,
+      message: "已提交实验 query，等待 Agent 事件流",
+      createdAt: 0,
+    });
+
     appendMessage({
       id: createId("msg"),
       role: "user",
       content: trimmed,
     });
     setInput("");
-    setPendingQuery(trimmed);
     setCurrentStageLabel("正在连接进度流");
     setProgressPct(0);
     setActiveTool(null);
     const history = buildAgentHistory(messages);
-    let encounteredError = false;
-
-    startTransition(async () => {
+    void (async () => {
       try {
         setStreamState("connecting");
         setCurrentStageLabel("正在请求分析结果");
         setProgressPct(28);
-        const response = await queryAgent(trimmed, history, currentSession?.id ?? undefined);
+        const response = await streamAgent(trimmed, history, currentSession?.id ?? undefined, {
+          onEvent: (event) => {
+            if (event.type === "tool_started" || event.type === "tool_progress") {
+              setCurrentStageLabel(event.message || "正在调用研究工具");
+              setProgressPct(event.type === "tool_progress" ? event.progressPct ?? 0 : 0);
+              setActiveTool(event.tool ? formatToolName(event.tool) : null);
+              onLabTrace?.({
+                id: createId("lab"),
+                phase: "tool",
+                tool: event.tool,
+                message: event.message,
+                progressPct: event.type === "tool_progress" ? event.progressPct : undefined,
+                createdAt: 0,
+              });
+            }
+            if (event.type === "message_completed") {
+              const credits = event.response.payload._credits;
+              if (credits && typeof credits === "object") {
+                onCreditUpdate?.({
+                  charged: typeof credits.charged === "number" ? credits.charged : 0,
+                  remaining: typeof credits.remaining === "number" ? credits.remaining : null,
+                  unlimited: credits.unlimited === true,
+                });
+              }
+              onLabTrace?.({
+                id: createId("lab"),
+                phase: "result",
+                response: event.response,
+                message: "最终回答已生成",
+                progressPct: 100,
+                createdAt: 0,
+              });
+            }
+            if (event.type === "error") {
+              setCurrentStageLabel(event.message);
+              onLabTrace?.({
+                id: createId("lab"),
+                phase: "error",
+                message: event.message,
+                createdAt: 0,
+              });
+            }
+          },
+        });
         appendAgentResponse(response);
         setCurrentStageLabel("回答已生成");
         setProgressPct(100);
         setStreamState("completed");
-        setPendingQuery("");
       } catch (error) {
-        encounteredError = true;
-        setPendingQuery("");
         setStreamState("error");
         appendMessage({
           id: createId("msg"),
@@ -273,8 +395,10 @@ export function AgentChat({ compact = false }: AgentChatProps) {
           content: `请求失败：${error instanceof Error ? error.message : "未知错误"}`,
         });
       }
-    });
+    })();
   }
+
+  askRef.current = ask;
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -296,6 +420,9 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     setSessions((prev) => [session, ...prev]);
     setCurrentSessionId(session.id);
     setInput("");
+    if (workspace && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("ashare:session-created", { detail: session.id }));
+    }
   }
 
   function onClearChat() {
@@ -316,7 +443,12 @@ export function AgentChat({ compact = false }: AgentChatProps) {
   function onDeleteSession(sessionId: string) {
     setSessions((prev) => {
       if (prev.length <= 1) {
-        return prev;
+        const fresh = createSession();
+        setCurrentSessionId(fresh.id);
+        if (workspace && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("ashare:session-created", { detail: fresh.id }));
+        }
+        return [fresh];
       }
       const next = prev.filter((session) => session.id !== sessionId);
       if (!next.length) {
@@ -375,24 +507,31 @@ export function AgentChat({ compact = false }: AgentChatProps) {
     const compactMessages = messages.length <= 1 ? [] : visibleMessages;
 
     return (
-      <div className="agent-chat-compact gpt-chat">
+      <div className={`agent-chat-compact gpt-chat ${workspace ? "workspace-agent" : ""}`}>
         <div className="gpt-chat-topbar">
           <div className="gpt-chat-heading">
             <div className="gpt-chat-title">Agent</div>
             <div className="gpt-chat-subtitle">消息、热点、个股统一问答</div>
           </div>
           <div className="gpt-topbar-actions">
-            <button
-              className="button ghost gpt-topbar-button"
-              onClick={() => setHistoryOpen((open) => !open)}
-              type="button"
-            >
-              {historyOpen ? "收起历史" : "历史记录"}
-            </button>
+            {workspace ? null : (
+              <button
+                className="button ghost gpt-topbar-button"
+                onClick={() => setHistoryOpen((open) => !open)}
+                type="button"
+              >
+                {historyOpen ? "收起历史" : "历史记录"}
+              </button>
+            )}
             <button className="button ghost gpt-topbar-button" onClick={onNewChat} type="button">
               新对话
             </button>
           </div>
+        </div>
+
+        <div className="gpt-ai-notice" role="note">
+          <span aria-hidden="true">!</span>
+          <p>AI 生成内容可能出错或过时，请结合来源核验；不构成投资建议。</p>
         </div>
 
         {historyOpen ? (
@@ -524,21 +663,30 @@ export function AgentChat({ compact = false }: AgentChatProps) {
                 </div>
               </div>
             ))}
-              {busy ? (
-                <div className="chat-row agent">
-                  <div className="chat-avatar agent">A</div>
-                  <div className="gpt-bubble agent">
-                    <div className="gpt-thinking">
-                      <span />
-                      <span />
-                      <span />
+            {busy ? (
+              <div className="chat-row agent">
+                <div className="chat-avatar agent">A</div>
+                <div className="gpt-bubble agent">
+                    <div className="workspace-thinking" aria-live="polite">
+                      <div className="workspace-thinking-head">
+                        <span className="workspace-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
+                        <div>
+                          <strong>Agent 正在研究</strong>
+                          <span>{currentStageLabel || "整理研究结果"}{activeTool ? ` · ${activeTool}` : ""}</span>
+                        </div>
+                        <b>{Math.max(progressPct, 12)}%</b>
+                      </div>
+                      <div className="workspace-thinking-track"><span style={{ width: `${Math.max(progressPct, 12)}%` }} /></div>
+                      <div className="workspace-thinking-steps" aria-label="Agent 工作阶段">
+                        {["理解问题", "选择工具", "整理证据", "生成回答"].map((stage, index) => (
+                          <span className={index === Math.min(3, Math.floor(progressPct / 26)) ? "active" : index < Math.floor(progressPct / 26) ? "complete" : ""} key={stage}>
+                            <i />{stage}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="gpt-progress-copy">
-                      <strong>{progressStages[progressStep] ?? "处理中"}</strong>
-                      <p>{progressStages.map((stage, index) => `${index + 1}. ${stage}`).join(" · ")}</p>
-                    </div>
-                  </div>
                 </div>
+              </div>
               ) : null}
             </div>
           </div>
@@ -585,6 +733,10 @@ export function AgentChat({ compact = false }: AgentChatProps) {
       <section className="content-grid">
         <div className="panel section">
           <h2>对话</h2>
+          <div className="gpt-ai-notice" role="note">
+            <span aria-hidden="true">!</span>
+            <p>AI 生成内容可能出错或过时，请结合来源核验；不构成投资建议。</p>
+          </div>
           <div className="chat-log">
             {visibleMessages.map((message) => (
               <div className={`bubble ${message.role}`} key={message.id}>
@@ -804,6 +956,10 @@ function truncate(text: string, maxLength: number) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength).trim()}...` : normalized;
 }
 
+function formatIndicatorValue(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "—";
+}
+
 function compactActionLabel(action: string) {
   if (action.includes("最新消息")) return "最新消息";
   if (action.includes("同板块")) return "板块对比";
@@ -878,9 +1034,6 @@ function AgentMetaChips({ toolsUsed, cacheHits }: { toolsUsed: string[]; cacheHi
 }
 
 function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
-  const portfolioHref = `/portfolio?stock_code=${encodeURIComponent(analysis.stock_code)}&stock_name=${encodeURIComponent(
-    analysis.stock_name,
-  )}&quantity=100&focus=cost&return_to=${encodeURIComponent("/agent")}&return_label=${encodeURIComponent("Agent")}`;
   const technicalNotes = analysis.technical_commentary?.slice(0, 2) ?? [];
   return (
     <div className="agent-payload-card agent-stock-card">
@@ -891,9 +1044,6 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
             {analysis.stock_name} <span>{analysis.stock_code}</span>
           </h3>
         </div>
-        <span className="agent-signal-pill">
-          {analysis.signal_summary.overall_signal} · {analysis.signal_summary.overall_score}
-        </span>
       </div>
       <div className="agent-card-metrics">
         <div className="agent-card-metric">
@@ -901,8 +1051,12 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
           <strong>{analysis.quote.current_price.toFixed(2)}</strong>
         </div>
         <div className="agent-card-metric">
-          <span>结论</span>
-          <strong>{analysis.signal_summary.overall_signal}</strong>
+          <span>MACD</span>
+          <strong>{formatIndicatorValue(analysis.technical_indicators.MACD)}</strong>
+        </div>
+        <div className="agent-card-metric">
+          <span>RSI（14）</span>
+          <strong>{formatIndicatorValue(analysis.technical_indicators.RSI)}</strong>
         </div>
       </div>
       {technicalNotes.length ? (
@@ -915,21 +1069,9 @@ function StockAnalysisCard({ analysis }: { analysis: StockAnalysisResponse }) {
         </div>
       ) : null}
       <div className="agent-card-actions agent-stock-actions">
-        <Link
-          href={`/stocks?query=${encodeURIComponent(analysis.stock_code)}&panel=overview#overview`}
-          className="button ghost"
-        >
-          总览
-        </Link>
-        <StockPanelLink stockCode={analysis.stock_code} panel="ai" className="button ghost" compactLoading>
-          AI
-        </StockPanelLink>
         <StockPanelLink stockCode={analysis.stock_code} panel="news" className="button ghost" compactLoading>
           新闻
         </StockPanelLink>
-        <Link href={portfolioHref} className="button">
-          持仓
-        </Link>
       </div>
     </div>
   );
@@ -943,7 +1085,7 @@ function GlobalNewsCards({ news }: { news: GlobalNewsItem[] }) {
         {news.slice(0, 4).map((item) => (
           <div className="agent-card-row" key={item.id}>
             <div className="agent-card-row-head">
-              <strong>{item.title}</strong>
+              <strong title={item.title}>{compactHeadline(item.title, 48)}</strong>
               <span className="muted">{item.source}</span>
             </div>
             <p className="muted">{truncate(item.summary, 160)}</p>
@@ -967,7 +1109,7 @@ function WebResultCards({ results }: { results: WebSearchResult[] }) {
           <div className="agent-card-row" key={item.id}>
             <div className="agent-card-row-head">
               <a href={item.url} target="_blank" rel="noreferrer" className="agent-card-row-link">
-                <strong>{item.title}</strong>
+                <strong title={item.title}>{compactHeadline(item.title, 48)}</strong>
               </a>
               <span className="muted">{item.source}</span>
             </div>
@@ -991,7 +1133,7 @@ function NewsCards({ news }: { news: NewsItem[] }) {
         {news.slice(0, 3).map((item) => (
           <div className="agent-card-row" key={item.id}>
             <div className="agent-card-row-head">
-              <strong>{item.title}</strong>
+              <strong title={item.title}>{compactHeadline(item.title, 48)}</strong>
               <span className="muted">{item.source}</span>
             </div>
             <p className="muted">{truncate(item.summary, 160)}</p>
@@ -1026,7 +1168,7 @@ function HotspotCards({ hotspots }: { hotspots: HotspotItem[] }) {
             <div className="tag-list">
               {item.related_stocks.slice(0, 3).map((stock) => (
                 <Link
-                  href={`/stocks?query=${encodeURIComponent(stock.stock_code)}`}
+                  href={`/work?symbol=${encodeURIComponent(stock.stock_code)}`}
                   className="tag"
                   key={`${item.topic_name}-${stock.stock_code}`}
                 >
@@ -1035,22 +1177,12 @@ function HotspotCards({ hotspots }: { hotspots: HotspotItem[] }) {
               ))}
             </div>
             <div className="inline-actions agent-card-actions">
-              <Link
-                href={`/hotspots?topic=${encodeURIComponent(item.topic_name)}#topic-${encodeURIComponent(item.topic_name)}`}
-                className="button ghost"
-              >
-                打开热点详情
-              </Link>
               {item.related_stocks[0] ? (
                 <Link
-                  href={`/portfolio?stock_code=${encodeURIComponent(item.related_stocks[0].stock_code)}&stock_name=${encodeURIComponent(
-                    item.related_stocks[0].stock_name,
-                  )}&quantity=100&focus=cost&return_to=${encodeURIComponent(
-                    `/hotspots?topic=${encodeURIComponent(item.topic_name)}#topic-${encodeURIComponent(item.topic_name)}`,
-                  )}&return_label=${encodeURIComponent("热点详情")}`}
-                  className="button"
+                  href="/work?context=portfolio"
+                  className="button ghost"
                 >
-                  将龙头加入持仓
+                  继续询问持仓
                 </Link>
               ) : null}
             </div>
@@ -1097,8 +1229,8 @@ function PortfolioCard({ analysis }: { analysis: PortfolioAnalysisResponse }) {
         </div>
       ) : null}
       <div className="agent-card-actions inline-actions">
-        <Link href="/portfolio" className="button ghost">
-          打开持仓页
+        <Link href="/work?context=portfolio" className="button ghost">
+          继续询问持仓
         </Link>
       </div>
     </div>

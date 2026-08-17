@@ -8,6 +8,7 @@ import hashlib
 import json
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -328,6 +329,7 @@ class NewsTracker:
     """个股新闻抓取器。"""
 
     NOTICE_LOOKBACK_DAYS = 7
+    SOURCE_TIMEOUT_SEC = 4.0
 
     def __init__(self, config=None):
         self.config = config
@@ -353,10 +355,7 @@ class NewsTracker:
                     ),
                 ),
             ]
-            for source_name, fetch_fn, transform_fn in primary_sources:
-                results.extend(
-                    self._collect_source_items(source_name, stock_name, stock_code, fetch_fn, transform_fn)
-                )
+            results.extend(self._collect_sources(primary_sources, stock_name, stock_code))
         elif not is_hk_stock(stock_code):
             primary_sources = [
                 (
@@ -415,10 +414,7 @@ class NewsTracker:
                     lambda df: self._filter_market_news(df, stock_name, stock_code, topic_keywords, "同花顺"),
                 ),
             ]
-            for source_name, fetch_fn, transform_fn in extra_sources:
-                results.extend(
-                    self._collect_source_items(source_name, stock_name, stock_code, fetch_fn, transform_fn)
-                )
+            results.extend(self._collect_sources(extra_sources, stock_name, stock_code))
 
         # Dedupe by (title, stock_code) keeping first occurrence
         seen_keys: set = set()
@@ -582,16 +578,22 @@ class NewsTracker:
     ) -> List[Dict[str, Any]]:
         try:
             data_frame = fetch_fn()
+            if data_frame is None or data_frame.empty:
+                logger.info("新闻源无结果 [%s] %s(%s)", source_name, stock_name, stock_code)
+                return []
+
+            raw_count = len(data_frame)
+            items = transform_fn(data_frame)
         except Exception as exc:
-            logger.warning("新闻源接口失败 [%s] %s(%s): %s", source_name, stock_name, stock_code, exc)
+            logger.warning(
+                "新闻源接口失败 [%s] %s(%s): %s",
+                source_name,
+                stock_name,
+                stock_code,
+                exc,
+            )
             return []
 
-        if data_frame is None or data_frame.empty:
-            logger.info("新闻源无结果 [%s] %s(%s)", source_name, stock_name, stock_code)
-            return []
-
-        raw_count = len(data_frame)
-        items = transform_fn(data_frame)
         if not items:
             logger.info(
                 "新闻源被过滤 [%s] %s(%s): 原始 %d 条, 命中 0 条",
@@ -611,6 +613,73 @@ class NewsTracker:
             len(items),
         )
         return items
+
+    def _collect_sources(
+        self,
+        sources: Sequence[Tuple[str, Any, Any]],
+        stock_name: str,
+        stock_code: str,
+    ) -> List[Dict[str, Any]]:
+        """Fetch independent sources in parallel and keep partial results.
+
+        A single provider can hang inside an upstream HTTP client, so source
+        failures must not block the other providers or the Agent response.
+        """
+        if not sources:
+            return []
+
+        executor = ThreadPoolExecutor(max_workers=len(sources))
+        future_items = [
+            (
+                source_name,
+                executor.submit(
+                    self._collect_source_items,
+                    source_name,
+                    stock_name,
+                    stock_code,
+                    fetch_fn,
+                    transform_fn,
+                ),
+            )
+            for source_name, fetch_fn, transform_fn in sources
+        ]
+        collected: List[Dict[str, Any]] = []
+        try:
+            done, pending = wait(
+                [future for _, future in future_items],
+                timeout=self.SOURCE_TIMEOUT_SEC,
+            )
+            for source_name, future in future_items:
+                if future in pending:
+                    future.cancel()
+                    logger.warning(
+                        "新闻源超时 [%s] %s(%s): %.1fs",
+                        source_name,
+                        stock_name,
+                        stock_code,
+                        self.SOURCE_TIMEOUT_SEC,
+                    )
+                    continue
+                if future not in done:
+                    continue
+                try:
+                    # Preserve the configured source order for deterministic
+                    # deduplication and prioritization.
+                    results = future.result()
+                except Exception as exc:
+                    logger.warning(
+                        "新闻源任务失败 [%s] %s(%s): %s",
+                        source_name,
+                        stock_name,
+                        stock_code,
+                        exc,
+                    )
+                    continue
+                if results:
+                    collected.extend(results)
+            return collected
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _get_topic_keywords(self, stock_name: str, stock_code: str) -> List[str]:
         keywords = list(DEFAULT_STOCK_TOPIC_KEYWORDS.get(stock_name, []))

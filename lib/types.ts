@@ -146,6 +146,7 @@ export type MarketIndexSnapshot = {
 
 export type MarketRegimeResponse = {
   regime: "risk_on" | "neutral" | "risk_off";
+  is_loading: boolean;
   score: number;
   action_bias: string;
   position_guidance: string;
@@ -344,6 +345,13 @@ export type AgentResponse = {
         last_heartbeat_at?: string | null;
       };
     };
+    _credits?: {
+      charged: number;
+      reserved: number;
+      released: number;
+      remaining?: number | null;
+      unlimited?: boolean;
+    };
     stock?: {
       name: string;
       code: string;
@@ -357,6 +365,14 @@ export type AgentResponse = {
     Record<string, unknown>;
 };
 
+export type CreditBalanceResponse = {
+  balance: number | null;
+  lifetime_granted: number;
+  lifetime_purchased: number;
+  lifetime_used: number;
+  unlimited: boolean;
+};
+
 export type AgentHistoryTurn = {
   role: "user" | "agent";
   content: string;
@@ -365,17 +381,10 @@ export type AgentHistoryTurn = {
   stock_name?: string | null;
 };
 
-export type ModelOption = {
-  value: string;
-  label: string;
-  description?: string | null;
-};
-
 export type UserSettingsResponse = {
   llm_model: string;
-  llm_model_source: "env" | "user";
+  llm_model_source: "env";
   llm_base_url?: string | null;
   llm_configured: boolean;
   updated_at?: string | null;
-  model_options: ModelOption[];
 };

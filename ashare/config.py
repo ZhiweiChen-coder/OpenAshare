@@ -73,7 +73,8 @@ class Config:
     llm_base_url: str = field(default_factory=lambda: _env_text("LLM_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com")
     llm_model: str = field(default_factory=lambda: _env_text("LLM_MODEL", "deepseek-chat") or "deepseek-chat")
 
-    data_count: int = field(default_factory=lambda: _env_int("DATA_COUNT", 180))
+    # 约 5 年日 K，供全屏图表展示长期走势；可用 DATA_COUNT 覆盖。
+    data_count: int = field(default_factory=lambda: _env_int("DATA_COUNT", 1250))
 
     stock_pool_path: Path = field(default_factory=lambda: _env_path("STOCK_POOL_PATH", PROJECT_ROOT / "data" / "stock_pool.json"))
     stock_topics_path: Path = field(default_factory=lambda: _env_path("STOCK_TOPICS_PATH", PROJECT_ROOT / "data" / "stock_topics.json"))
@@ -113,4 +114,3 @@ class Config:
         self.web_search_timeout = max(1, self.web_search_timeout)
         self.monitor_push_methods = [method for method in self.monitor_push_methods if method]
         self.news_keywords = [keyword for keyword in self.news_keywords if keyword]
-

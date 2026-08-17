@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from ashare.data import DataFetcher
+from ashare.stock_pool import infer_market, normalize_stock_code
 from ashare.search import StockSearcher
 from ashare.stock_pool import (
     extract_symbol,
@@ -94,6 +95,21 @@ def test_fetch_stock_data_routes_us_through_us_pipeline(monkeypatch):
     out = fetcher.fetch_stock_data("AAPL")
     assert called["code"] == "US.AAPL"
     assert out is sentinel
+
+
+def test_hang_seng_index_uses_hk_index_pipeline(monkeypatch):
+    fetcher = DataFetcher()
+    sentinel = pd.DataFrame(
+        {"open": [1.0], "close": [1.1], "high": [1.2], "low": [0.9], "volume": [10.0]},
+        index=pd.to_datetime(["2026-01-02"]),
+    )
+
+    monkeypatch.setattr(fetcher, "_fetch_stock_data_hk_index", lambda *args: sentinel)
+
+    assert normalize_stock_code("HSI") == "HK.HSI"
+    assert normalize_stock_code("^HSI") == "HK.HSI"
+    assert infer_market("HK.HSI") == "hk"
+    assert fetcher.fetch_stock_data("HSI") is sentinel
 
 
 def test_finnhub_parsing(monkeypatch):

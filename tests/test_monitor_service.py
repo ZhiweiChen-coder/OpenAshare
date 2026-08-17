@@ -182,6 +182,42 @@ def test_news_tracker_logs_source_failure_no_result_and_filtered(monkeypatch, ca
     assert "新闻源被过滤 [财联社]" in caplog.text
 
 
+def test_news_tracker_keeps_fast_sources_when_one_source_times_out(monkeypatch):
+    import time
+    import pandas as pd
+    import ashare.monitor as monitor_module
+
+    tracker = monitor_module.NewsTracker(DummyConfig())
+    tracker.SOURCE_TIMEOUT_SEC = 0.05
+
+    def slow_cninfo(**kwargs):
+        time.sleep(0.2)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(monitor_module.ak, "stock_zh_a_disclosure_report_cninfo", slow_cninfo)
+    monkeypatch.setattr(
+        monitor_module.ak,
+        "stock_news_em",
+        lambda symbol: pd.DataFrame(
+            [
+                {
+                    "新闻标题": "海光信息发布业绩公告",
+                    "内容": "公司披露最新业绩情况",
+                    "来源": "东方财富",
+                    "发布时间": "2026-03-07 09:30:00",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(monitor_module.ak, "stock_info_global_cls", lambda symbol="全部": pd.DataFrame())
+    monkeypatch.setattr(tracker, "_fetch_ak_news", lambda func_name: None)
+
+    result = tracker.fetch_stock_news("sh688041", "海光信息")
+
+    assert len(result) == 1
+    assert result[0]["source"] == "东方财富"
+
+
 def test_stock_code_normalization_and_support_levels():
     assert normalize_stock_code("688041.SH") == "sh688041"
     assert normalize_stock_code("300750.SZ") == "sz300750"

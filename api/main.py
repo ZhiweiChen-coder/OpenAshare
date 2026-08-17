@@ -1,15 +1,15 @@
 ﻿from __future__ import annotations
 
 import hashlib
-import base64
 import asyncio
-import hmac
 import json
 import logging
 import os
 import sqlite3
 import uuid
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from threading import Lock
 from typing import Any, List, Optional
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -27,6 +27,7 @@ from api.schemas import (
     AgentHistoryTurn,
     AgentQuery,
     AgentResponse,
+    CreditBalanceResponse,
     GlobalNewsItem,
     HotspotDetailResponse,
     HotspotItem,
@@ -44,8 +45,19 @@ from api.schemas import (
     UserSettingsUpdate,
     WebSearchResult,
 )
+from api.credits import (
+    CreditBalance,
+    CreditError,
+    CreditReservation,
+    CreditService,
+    estimate_request_cost,
+    final_request_cost,
+)
 from api.sse import encode_sse, sse_response
 from api.settings_store import UserSettingsStore
+from api.supabase_auth import require_supabase_user
+from api.supabase_config import SupabaseConfig
+from api.supabase_store import SupabaseStoreError, SupabaseWorkspaceStore
 from api.services import (
     AgentService,
     HotspotService,
@@ -69,64 +81,49 @@ portfolio_service = PortfolioService(analysis_service=stock_service)
 strategy_service = StrategyService(stock_service, news_service, hotspot_service, market_service)
 web_search_service = WebSearchService()
 agent_service = AgentService(stock_service, news_service, hotspot_service, portfolio_service, web_search_service)
-
-DEMO_ACCESS_COOKIE_NAME = "ashare_demo_access"
-DEMO_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-
-
-def _get_demo_access_code() -> str:
-    return os.getenv("DEMO_ACCESS_CODE", "").strip()
+supabase_config = SupabaseConfig.from_env()
+credit_service = CreditService(supabase_config)
 
 
-def _get_demo_access_secret() -> str:
-    return os.getenv("DEMO_ACCESS_SECRET", "").strip() or _get_demo_access_code()
+class CloudRateLimiter:
+    """Small in-process guard for the hosted Beta.
+
+    It intentionally activates only when Supabase auth is enabled. The Oracle
+    deployment uses one worker by default, and Nginx adds a second edge limit.
+    """
+
+    def __init__(self) -> None:
+        self._events: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self._lock = Lock()
+
+    def allow(self, *, subject: str, bucket: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+        now = datetime.now(timezone.utc).timestamp()
+        key = (subject, bucket)
+        with self._lock:
+            events = self._events[key]
+            cutoff = now - window_seconds
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if len(events) >= limit:
+                retry_after = max(1, int(events[0] + window_seconds - now) + 1)
+                return False, retry_after
+            events.append(now)
+        return True, 0
 
 
-def _demo_access_enabled() -> bool:
-    return bool(_get_demo_access_code() and _get_demo_access_secret())
+cloud_rate_limiter = CloudRateLimiter()
 
 
-def _demo_access_signature(issued_at: int, secret: str | None = None) -> str:
-    secret_value = secret or _get_demo_access_secret()
-    digest = hmac.new(secret_value.encode("utf-8"), str(issued_at).encode("utf-8"), hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+def _cloud_auth_enabled() -> bool:
+    return supabase_config.enabled and supabase_config.require_auth
 
 
-def _build_demo_access_token(now: datetime | None = None) -> tuple[str, datetime]:
-    issued_at = int((now or datetime.now(timezone.utc)).timestamp())
-    expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
-    return f"{issued_at}.{_demo_access_signature(issued_at)}", expires_at
-
-
-def _demo_access_status_from_token(token: Optional[str]) -> dict[str, Any]:
-    if not _demo_access_enabled():
-        return {"enabled": False, "unlocked": True, "expires_at": None}
-    if not token:
-        return {"enabled": True, "unlocked": False, "expires_at": None}
+def _bounded_env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
     try:
-        issued_at_raw, signature = token.split(".", 1)
-        issued_at = int(issued_at_raw)
-    except (ValueError, TypeError):
-        return {"enabled": True, "unlocked": False, "expires_at": None}
-    expected = _demo_access_signature(issued_at)
-    if not hmac.compare_digest(expected, signature):
-        return {"enabled": True, "unlocked": False, "expires_at": None}
-    now_seconds = int(datetime.now(timezone.utc).timestamp())
-    if issued_at + DEMO_ACCESS_MAX_AGE_SECONDS < now_seconds:
-        expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
-        return {"enabled": True, "unlocked": False, "expires_at": expires_at.isoformat()}
-    expires_at = datetime.fromtimestamp(issued_at + DEMO_ACCESS_MAX_AGE_SECONDS, tz=timezone.utc)
-    return {"enabled": True, "unlocked": True, "expires_at": expires_at.isoformat()}
-
-
-def _require_demo_access(request: Request, feature_name: str) -> None:
-    if not _demo_access_enabled():
-        return
-    token = request.cookies.get(DEMO_ACCESS_COOKIE_NAME)
-    if _demo_access_status_from_token(token).get("unlocked"):
-        return
-    raise HTTPException(status_code=403, detail=f"{feature_name}需要先解锁演示访问。")
-
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
 
 def _raise_not_found(exc: NotFoundError) -> None:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -344,6 +341,53 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def enforce_hosted_beta_access(request: Request, call_next):
+    """Require a Supabase JWT for every hosted workspace API request.
+
+    Local-first development remains intentionally open when Supabase is not
+    configured. In hosted mode, the backend must not rely on a frontend route
+    guard because its public origin can be called directly.
+    """
+
+    path = request.url.path
+    if request.method == "OPTIONS" or path in {"/health", "/healthz"} or not _cloud_auth_enabled():
+        return await call_next(request)
+
+    try:
+        user = await asyncio.to_thread(require_supabase_user, request, supabase_config)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    request.state.supabase_user = user
+    is_agent_request = path.startswith("/api/agent/")
+    limit = _bounded_env_int(
+        "CLOUD_AGENT_RATE_LIMIT_REQUESTS" if is_agent_request else "CLOUD_RATE_LIMIT_REQUESTS",
+        10 if is_agent_request else 120,
+        minimum=1,
+        maximum=10_000,
+    )
+    window_seconds = _bounded_env_int(
+        "CLOUD_RATE_LIMIT_WINDOW_SECONDS",
+        60,
+        minimum=1,
+        maximum=3_600,
+    )
+    allowed, retry_after = cloud_rate_limiter.allow(
+        subject=f"user:{user.id}",
+        bucket="agent" if is_agent_request else "api",
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "请求过于频繁，请稍后重试。"},
+            headers={"Retry-After": str(retry_after)},
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(Exception)
@@ -694,18 +738,60 @@ def healthz() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/workspace/bootstrap")
+def workspace_bootstrap(request: Request) -> dict[str, Any]:
+    """Return the authenticated user's Supabase workspace state when enabled.
+
+    Local development deliberately stays on the existing SQLite/localStorage
+    path until Supabase credentials and a user access token are configured.
+    """
+    if not supabase_config.enabled:
+        return {
+            "storage": "local",
+            "user_id": None,
+            "settings": None,
+            "watchlists": [],
+            "sessions": [],
+            "pinned_contexts": [],
+        }
+
+    user = require_supabase_user(request, supabase_config)
+    try:
+        return SupabaseWorkspaceStore(supabase_config, user.access_token).bootstrap(user.id)
+    except SupabaseStoreError as exc:
+        raise HTTPException(status_code=502, detail="Supabase workspace 暂时不可用。") from exc
+
+
+@app.get("/api/billing/balance", response_model=CreditBalanceResponse)
+async def billing_balance(request: Request) -> CreditBalanceResponse:
+    try:
+        user = await _credit_user_for_request(request)
+        balance: CreditBalance = await asyncio.to_thread(credit_service.balance, user)
+        return CreditBalanceResponse(
+            balance=balance.balance,
+            lifetime_granted=balance.lifetime_granted,
+            lifetime_purchased=balance.lifetime_purchased,
+            lifetime_used=balance.lifetime_used,
+            unlimited=balance.unlimited,
+        )
+    except CreditError as exc:
+        _raise_credit_http(exc)
+
+
 @app.get("/api/settings", response_model=UserSettingsResponse)
 def get_user_settings(request: Request) -> UserSettingsResponse:
-    _require_demo_access(request, "设置")
     return settings_store.get_settings()
 
 
 @app.put("/api/settings", response_model=UserSettingsResponse)
 def update_user_settings(request: Request, payload: UserSettingsUpdate) -> UserSettingsResponse:
-    _require_demo_access(request, "设置")
+    if _cloud_auth_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="云端 Beta 的模型连接由平台管理，不能通过 API 修改。",
+        )
     global _pydantic_agent, _agent_deps, _pydantic_agent_signature
     updated = settings_store.update_settings(
-        llm_model=payload.llm_model,
         llm_base_url=payload.llm_base_url,
         llm_api_key=payload.llm_api_key,
     )
@@ -751,8 +837,6 @@ def get_stock_analysis(
     request_id: Optional[str] = Query(None, description="用于跟踪单次分析进度的请求 ID"),
 ) -> Response:
     try:
-        if include_ai:
-            _require_demo_access(request, "AI 分析")
         if request_id:
             payload = stock_service.get_stock_analysis(stock_code, include_ai=include_ai, request_id=request_id)
         else:
@@ -785,8 +869,6 @@ async def stream_stock_analysis(
     stock_code: str,
     include_ai: bool = Query(True, description="是否生成 AI 文本分析，默认开启"),
 ):
-    if include_ai:
-        _require_demo_access(request, "AI 分析")
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     normalized_code = stock_code.strip()
@@ -967,19 +1049,16 @@ def get_can_slim_screen(
 
 @app.get("/api/portfolio", response_model=List[PortfolioPosition])
 def list_portfolio_positions(request: Request) -> List[PortfolioPosition]:
-    _require_demo_access(request, "持仓管理")
     return portfolio_service.list_positions()
 
 
 @app.post("/api/portfolio/positions", response_model=PortfolioPosition, status_code=201)
 def create_portfolio_position(request: Request, position: PortfolioPosition) -> PortfolioPosition:
-    _require_demo_access(request, "持仓管理")
     return portfolio_service.create_position(position)
 
 
 @app.put("/api/portfolio/positions/{position_id}", response_model=PortfolioPosition)
 def update_portfolio_position(request: Request, position_id: int, position: PortfolioPosition) -> PortfolioPosition:
-    _require_demo_access(request, "持仓管理")
     try:
         return portfolio_service.update_position(position_id, position)
     except NotFoundError as exc:
@@ -988,7 +1067,6 @@ def update_portfolio_position(request: Request, position_id: int, position: Port
 
 @app.delete("/api/portfolio/positions/{position_id}", status_code=204)
 def delete_portfolio_position(request: Request, position_id: int) -> Response:
-    _require_demo_access(request, "持仓管理")
     try:
         portfolio_service.delete_position(position_id)
     except NotFoundError as exc:
@@ -998,37 +1076,31 @@ def delete_portfolio_position(request: Request, position_id: int) -> Response:
 
 @app.get("/api/portfolio/analysis", response_model=PortfolioAnalysisResponse)
 def analyze_portfolio(request: Request) -> PortfolioAnalysisResponse:
-    _require_demo_access(request, "持仓分析")
     return portfolio_service.analyze_portfolio()
 
 
 @app.get("/api/strategy-holdings", response_model=List[StrategyHolding])
 def list_strategy_holdings(request: Request) -> List[StrategyHolding]:
-    _require_demo_access(request, "策略持股")
     return strategy_service.list_holdings()
 
 
 @app.post("/api/strategy-holdings", response_model=StrategyHolding, status_code=201)
 def create_strategy_holding(request: Request, holding: StrategyHolding) -> StrategyHolding:
-    _require_demo_access(request, "策略持股")
     return strategy_service.create_holding(holding)
 
 
 @app.get("/api/strategy-holdings/analysis", response_model=StrategyHoldingAnalysisResponse)
 def analyze_strategy_holdings(request: Request) -> StrategyHoldingAnalysisResponse:
-    _require_demo_access(request, "策略持股分析")
     return strategy_service.analyze_holdings()
 
 
 @app.post("/api/strategy-holdings/refresh", response_model=StrategyHoldingAnalysisResponse)
 def refresh_strategy_holdings(request: Request) -> StrategyHoldingAnalysisResponse:
-    _require_demo_access(request, "策略持股分析")
     return strategy_service.refresh_holdings()
 
 
 @app.put("/api/strategy-holdings/{holding_id}", response_model=StrategyHolding)
 def update_strategy_holding(request: Request, holding_id: int, holding: StrategyHolding) -> StrategyHolding:
-    _require_demo_access(request, "策略持股")
     try:
         return strategy_service.update_holding(holding_id, holding)
     except NotFoundError as exc:
@@ -1037,7 +1109,6 @@ def update_strategy_holding(request: Request, holding_id: int, holding: Strategy
 
 @app.delete("/api/strategy-holdings/{holding_id}", status_code=204)
 def delete_strategy_holding(request: Request, holding_id: int) -> Response:
-    _require_demo_access(request, "策略持股")
     try:
         strategy_service.delete_holding(holding_id)
     except NotFoundError as exc:
@@ -1087,6 +1158,52 @@ def _safe_agent_json(resp: AgentResponse) -> dict[str, Any]:
         return _agent_response_to_json(resp)
     except BaseException:
         return {**_AGENT_ERROR_JSON, "summary": "Response serialization failed. See server logs."}
+
+
+async def _credit_user_for_request(request: Request):
+    """Resolve auth only when the deployed Credit system is enabled."""
+    if not credit_service.enforced:
+        return None
+    cached_user = getattr(request.state, "supabase_user", None)
+    if cached_user is not None:
+        return cached_user
+    return await asyncio.to_thread(require_supabase_user, request, supabase_config)
+
+
+def _raise_credit_http(exc: CreditError) -> None:
+    status = {
+        "auth_required": 401,
+        "insufficient_credits": 402,
+        "billing_unavailable": 503,
+    }.get(exc.code, 400)
+    raise HTTPException(status_code=status, detail=exc.message) from exc
+
+
+def _credit_metadata(payload: AgentQuery, estimated_amount: int) -> dict[str, Any]:
+    return {
+        "session_id": payload.session_id,
+        "estimated_amount": estimated_amount,
+        "query_preview": payload.query[:240],
+    }
+
+
+def _attach_credit_usage(
+    resp: AgentResponse,
+    reservation: CreditReservation,
+    charged_amount: int,
+    released_amount: int,
+    remaining_balance: Optional[int],
+) -> AgentResponse:
+    payload = dict(resp.payload or {})
+    payload["_credits"] = {
+        "charged": charged_amount,
+        "reserved": reservation.reserved_amount,
+        "released": released_amount,
+        "remaining": remaining_balance,
+        "unlimited": reservation.bypassed,
+    }
+    resp.payload = payload
+    return resp
 
 
 def _attach_memory_profile(resp: AgentResponse, profile: dict[str, Any], heartbeat: Optional[dict[str, Any]] = None) -> AgentResponse:
@@ -1490,11 +1607,41 @@ async def _run_agent_request(
 @app.post("/api/agent/query")
 async def agent_query(request: Request, payload: AgentQuery) -> Response:
     """Always return 200 + JSON. Never 500 - errors go in body."""
+    estimated_amount = estimate_request_cost(payload.query)
+    request_id = payload.request_id or str(uuid.uuid4())
     try:
-        _require_demo_access(request, "Agent 聊天")
+        credit_user = await _credit_user_for_request(request)
+        reservation = await asyncio.to_thread(
+            credit_service.reserve,
+            credit_user,
+            request_id,
+            estimated_amount,
+            _credit_metadata(payload, estimated_amount),
+        )
+    except CreditError as exc:
+        _raise_credit_http(exc)
+
+    settled = False
+    try:
         merged_history = _merge_agent_history(payload)
         memory_profile = agent_memory_store.get_profile(payload.session_id or "")
         resp = await _run_agent_request(payload, merged_history, memory_profile)
+        actual_amount = final_request_cost(resp.intent)
+        settlement = await asyncio.to_thread(
+            credit_service.settle,
+            credit_user,
+            reservation,
+            actual_amount,
+            {"intent": resp.intent},
+        )
+        settled = True
+        resp = _attach_credit_usage(
+            resp,
+            reservation,
+            settlement.charged_amount,
+            settlement.released_amount,
+            settlement.balance,
+        )
         _persist_agent_turns(payload.session_id, payload, resp)
         heartbeat = _maybe_run_heartbeat(payload.session_id)
         resp = _attach_memory_profile(resp, agent_memory_store.get_profile(payload.session_id or ""), heartbeat)
@@ -1504,6 +1651,11 @@ async def agent_query(request: Request, payload: AgentQuery) -> Response:
     except BaseException as e:
         if isinstance(e, (SystemExit, KeyboardInterrupt)):
             raise
+        if not settled:
+            try:
+                await asyncio.to_thread(credit_service.release, credit_user, reservation, {"reason": "agent_failed"})
+            except CreditError:
+                logger.exception("Credit release failed after Agent error")
         logger.exception("agent_query failed")
         try:
             return JSONResponse(
@@ -1518,7 +1670,20 @@ async def agent_query(request: Request, payload: AgentQuery) -> Response:
 
 @app.post("/api/agent/query/stream")
 async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
-    _require_demo_access(request, "Agent 聊天")
+    estimated_amount = estimate_request_cost(payload.query)
+    request_id = payload.request_id or str(uuid.uuid4())
+    try:
+        credit_user = await _credit_user_for_request(request)
+        reservation = await asyncio.to_thread(
+            credit_service.reserve,
+            credit_user,
+            request_id,
+            estimated_amount,
+            _credit_metadata(payload, estimated_amount),
+        )
+    except CreditError as exc:
+        _raise_credit_http(exc)
+
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
@@ -1531,6 +1696,7 @@ async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
             progress_pct=5,
             message="已接收问题，开始理解查询意图",
         )
+        settled = False
         try:
             merged_history = _merge_agent_history(payload)
             memory_profile = agent_memory_store.get_profile(payload.session_id or "")
@@ -1555,6 +1721,22 @@ async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
                 )
 
             resp = await _run_agent_request(payload, merged_history, memory_profile, report)
+            actual_amount = final_request_cost(resp.intent)
+            settlement = await asyncio.to_thread(
+                credit_service.settle,
+                credit_user,
+                reservation,
+                actual_amount,
+                {"intent": resp.intent},
+            )
+            settled = True
+            resp = _attach_credit_usage(
+                resp,
+                reservation,
+                settlement.charged_amount,
+                settlement.released_amount,
+                settlement.balance,
+            )
             _persist_agent_turns(payload.session_id, payload, resp)
             report("persist_memory", 95, "会话记忆已更新")
             heartbeat = _maybe_run_heartbeat(payload.session_id)
@@ -1571,6 +1753,11 @@ async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
         except BaseException as exc:
             if isinstance(exc, (SystemExit, KeyboardInterrupt)):
                 raise
+            if not settled:
+                try:
+                    await asyncio.to_thread(credit_service.release, credit_user, reservation, {"reason": "agent_failed"})
+                except CreditError:
+                    logger.exception("Credit release failed after Agent stream error")
             logger.exception("agent_query_stream failed")
             _emit_agent_progress(
                 queue,
@@ -1589,7 +1776,10 @@ async def agent_query_stream(request: Request, payload: AgentQuery) -> Response:
                 progress_pct=100,
                 message="响应流已结束",
             )
-            await queue.put(None)
+            # _emit_agent_progress schedules queue writes on the event loop. The
+            # sentinel must use the same FIFO scheduling path, otherwise it can
+            # be consumed before the queued result/done events.
+            loop.call_soon_threadsafe(queue.put_nowait, None)
 
     asyncio.create_task(runner())
     return sse_response(queue)

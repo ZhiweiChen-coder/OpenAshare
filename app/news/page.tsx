@@ -1,5 +1,5 @@
-import { NewsPageClient } from "./news-page-client";
+import { redirect } from "next/navigation";
 
 export default function NewsPage() {
-  return <NewsPageClient />;
+  redirect("/work?context=market");
 }
