@@ -9,6 +9,9 @@ In the Supabase Dashboard SQL Editor, run:
 
 ```text
 supabase/migrations/0001_openashare_workspace.sql
+supabase/migrations/0002_credit_system.sql
+supabase/migrations/0003_fix_credit_rpc_ambiguity.sql
+supabase/migrations/0004_waitlist_admin.sql
 ```
 
 The migration creates the workspace tables, foreign keys, indexes, updated-at
@@ -20,7 +23,8 @@ tables exist:
 
 ```text
 user_settings, watchlists, watchlist_items, agent_sessions,
-agent_messages, pinned_contexts, portfolio_positions, strategy_holdings
+agent_messages, pinned_contexts, portfolio_positions, strategy_holdings,
+admin_users, waitlist_applications
 ```
 
 ## 2. Configure the backend locally
@@ -92,6 +96,26 @@ The Workspace login panel now includes Google OAuth. In Supabase Dashboard:
 The app exchanges the OAuth code in
 `app/auth/callback/route.ts`, so the session is stored in the SSR cookie and
 the same RLS-protected workspace bootstrap is used after Google login.
+
+## 5. Configure the waitlist administrator
+
+The public waitlist is available at `/waitlist`. It stores each signed-in
+user's investment experience, market focus, research goals, and optional note.
+Every applicant can read only their own record. The private page at
+`/admin/waitlist` does not load any applications unless the signed-in user is
+in `public.admin_users`.
+
+After the intended administrator has registered, run this in the Supabase SQL
+Editor, replacing the email address:
+
+```sql
+insert into public.admin_users (user_id)
+select id from auth.users where email = 'admin@example.com'
+on conflict (user_id) do nothing;
+```
+
+The access check is enforced by Row Level Security, not merely by hiding the
+admin route in the frontend.
 
 ## Current boundary
 

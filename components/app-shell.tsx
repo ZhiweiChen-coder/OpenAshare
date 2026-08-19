@@ -125,13 +125,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
   const isLanding = pathname === "/";
   const isWorkspace = pathname === "/work";
+  const isWaitlistFlow = pathname === "/waitlist" || pathname.startsWith("/admin");
   const isPreviewCapture = searchParams.get("preview") === "1";
   const { sidebarOpen, isMobile, sidebarWidth, isResizing, startResize } = useAppShell();
   const shellStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
   } as CSSProperties;
 
-  if (isLanding || isPreviewCapture || isWorkspace) {
+  if (isLanding || isPreviewCapture || isWorkspace || isWaitlistFlow) {
     return (
       <div className={`app-shell ${isLanding ? "landing-shell" : "no-sidebar"} ${isWorkspace ? "workspace-route" : ""}`}>
         <div className="main-content">{children}</div>

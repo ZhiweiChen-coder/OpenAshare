@@ -98,8 +98,8 @@ const landingCopy: Record<
     waitlistKicker: "THE FIRST COHORT",
     waitlistTitle: "加入等待名单，一起把这张研究桌面做得更聪明。",
     waitlistCopy: "云端 Beta 正向关注内地与香港股票的投资者、研究者与开发者分批开放。",
-    waitlistDetails: ["使用邮箱或 Google 登录后申请", "优先体验研究助手、图表与市场语境", "你的反馈会直接进入下一轮产品迭代"],
-    waitlistAction: "登录后申请 Beta 访问",
+    waitlistDetails: ["登录后用一分钟完成申请", "告诉我们你的投资经历与研究重点", "你的反馈会直接进入下一轮产品迭代"],
+    waitlistAction: "填写 Beta 申请",
     waitlistNote: "已有邀请？登录后即可进入你的研究工作台。",
     footer: "OpenAshare 提供研究辅助，不构成投资建议。",
   },
@@ -145,8 +145,8 @@ const landingCopy: Record<
     waitlistKicker: "THE FIRST COHORT",
     waitlistTitle: "Join the waitlist. Help shape a sharper research desk.",
     waitlistCopy: "The cloud Beta is opening in small cohorts for investors, researchers, and builders following Mainland China and Hong Kong equities.",
-    waitlistDetails: ["Request access after signing in with email or Google", "Try the research workspace, charting, and market context first", "Put your feedback directly into the next product cycle"],
-    waitlistAction: "Sign in to request beta access",
+    waitlistDetails: ["Complete a one-minute application after signing in", "Tell us about your investing experience and research focus", "Put your feedback directly into the next product cycle"],
+    waitlistAction: "Apply for Beta access",
     waitlistNote: "Already invited? Sign in to open your research workspace.",
     footer: "OpenAshare supports research and does not constitute investment advice.",
   },
@@ -210,9 +210,9 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
           <p className={styles.heroDescription}>{copy.heroCopy}</p>
 
           <div className={styles.heroActions}>
-            <a className={styles.primaryButton} href="#waitlist">
+            <Link className={styles.primaryButton} href="/waitlist">
               {copy.waitlistCta}<span aria-hidden="true">↘</span>
-            </a>
+            </Link>
             <a className={styles.githubButton} href={githubUrl} target="_blank" rel="noopener noreferrer">
               <GitHubIcon />
               <span>{copy.githubCta}</span>
@@ -302,7 +302,7 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
           <ul>
             {copy.waitlistDetails.map((detail) => <li key={detail}>{detail}</li>)}
           </ul>
-          <Link className={styles.waitlistButton} href={language === "en" ? "/work?lang=en" : "/work"}>
+          <Link className={styles.waitlistButton} href="/waitlist">
             {copy.waitlistAction}<span aria-hidden="true">→</span>
           </Link>
           <p>{copy.waitlistNote}</p>

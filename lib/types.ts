@@ -388,3 +388,20 @@ export type UserSettingsResponse = {
   llm_configured: boolean;
   updated_at?: string | null;
 };
+
+export type InvestmentExperience = "beginner" | "one_to_three_years" | "three_to_five_years" | "five_plus_years";
+
+export type WaitlistApplicationStatus = "submitted" | "reviewing" | "invited" | "declined";
+
+export type WaitlistApplication = {
+  id: string;
+  user_id: string;
+  email: string;
+  investment_experience: InvestmentExperience;
+  focus_markets: string[];
+  research_goals: string[];
+  note: string;
+  status: WaitlistApplicationStatus;
+  created_at: string;
+  updated_at: string;
+};
