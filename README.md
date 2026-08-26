@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <strong>面向中国与香港股票的 AI 研究工作台。</strong><br />
+  <strong>面向中国大陆与香港股票的 AI 研究工作台。</strong><br />
   从行情、新闻和技术面，到带上下文的 Agent 研究，一处完成。
 </p>
 
