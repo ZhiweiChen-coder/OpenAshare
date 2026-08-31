@@ -1,4 +1,8 @@
-# OpenAshare
+<p align="center">
+  <img src="public/logo.png" alt="OpenAshare Logo" width="96" />
+</p>
+
+<h1 align="center">OpenAshare</h1>
 
 <p align="center">
   <a href="README.md"><strong>中文</strong></a>
@@ -7,8 +11,8 @@
 </p>
 
 <p align="center">
-  <strong>面向中国与香港股票的 AI 研究工作台。</strong><br />
-  从行情、新闻和技术面，到带上下文的 Agent 研究，一处完成。
+  <strong>面向 A 股与港股的 AI 研究工作台。</strong><br />
+  行情、技术面、新闻、热点、持仓和 Agent，一站式完成。
 </p>
 
 <p align="center">
@@ -20,14 +24,30 @@
 </p>
 
 <p align="center">
+  <a href="#快速开始">立即运行</a>
+  ·
+  <a href="#产品一览">查看功能</a>
+  ·
+  <a href="#加入微信群">加入微信群</a>
+</p>
+
+<p align="center">
   <img src="assets/screenshots/agent-research-beta.png" alt="OpenAshare Agent 研究工作台：分析比亚迪并保留对话上下文" width="960" />
 </p>
 
-> **云端 Beta 正在开放。** 想先体验云端工作台？访问产品首页并登录后申请 Beta 访问；想自己掌控数据与模型？直接在本地运行本仓库。
+> **云端 Beta 正在开放。** 也可以直接本地运行，自己掌控数据与模型。
 
-OpenAshare 不是另一个只展示行情的面板。它将个股技术分析、市场消息、热点主题、持仓复盘、策略观察和 Agent 对话连接成一条研究链路：从一个代码开始，看到数据、指标、新闻与 AI 的可追问解读；从一个市场热点出发，回到关联标的与自己的持仓语境。
+输入股票代码，快速完成：**看行情 → 查新闻 → 问 Agent → 做跟踪**。
 
-项目以本地优先和可自托管为基础，也在建设面向海外华人与国际研究者的中英文产品体验，帮助更多人更方便地理解中国与香港股票市场。
+## 加入微信群
+
+欢迎大家加入 OpenAshare 体验群，交流使用体验、研究想法和项目反馈。请使用微信扫描下方二维码加入群聊：
+
+<p align="center">
+  <img src="assets/community/wechat-group.png" alt="OpenAshare 微信群活码" width="400" />
+</p>
+
+> 这是 OpenAshare 微信群活码，欢迎扫码加入。
 
 > 重要提示：本项目仅用于研究、学习和工具搭建，不构成投资建议。市场有风险，所有决策请自行负责。
 
@@ -41,14 +61,12 @@ OpenAshare 不是另一个只展示行情的面板。它将个股技术分析、
 
 曲线由 [Star History](https://star-history.com/#ZhiweiChen-coder/OpenAshare&Date) 提供，会随公开 Star 数据更新。点击图表可查看交互式历史；如果这个项目对你有帮助，点一颗 Star 会直接推动下一段曲线。
 
-## 为什么是 OpenAshare
+## 核心功能
 
-研究中国股票时，价格、新闻、K 线、持仓和 AI 通常散落在不同窗口，最容易丢掉的恰恰是上下文。OpenAshare 希望把研究动作收进一个可控、可复核的工作台：
-
-- **从问题到判断的一条链路**：行情、技术指标、新闻、热点和持仓信息彼此可跳转，不必反复复制上下文。
-- **Agent 为研究服务**：让 AI 解释、归纳、串联和继续追问；保留原始数据与指标，避免把判断变成黑箱。
-- **中国 / 香港股票语境**：面向 A 股工作流构建，同时支持港股代码与更适合国际用户理解的英文入口。
-- **本地优先、模型可替换**：可连接 DeepSeek、OpenAI-compatible API 或本地模型网关；适合个人研究、私有部署和二次开发。
+- **行情与技术分析**：K 线、指标、信号和市场状态
+- **新闻与热点**：个股新闻、市场消息和关联标的
+- **Agent 研究**：基于股票、新闻和组合上下文持续追问
+- **持仓与监控**：组合盈亏、风险分析、观察清单和策略跟踪
 
 ## 产品一览
 
@@ -98,7 +116,7 @@ flowchart LR
 - **Storage**：SQLite、本地 JSON 设置文件
 - **AI**：可配置 base URL、model 和 API key 的 OpenAI-compatible API
 
-## 本地运行
+## 快速开始
 
 ### 环境要求
 
