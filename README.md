@@ -54,9 +54,13 @@
 ## Star 增长
 
 <p align="center">
-  <a href="https://star-history.com/#ZhiweiChen-coder/OpenAshare&amp;Date">
-    <img src="https://api.star-history.com/svg?repos=ZhiweiChen-coder/OpenAshare&amp;type=Date" alt="OpenAshare GitHub Star 增长曲线" width="720" />
-  </a>
+<a href="https://www.star-history.com/?repos=ZhiweiChen-coder%2FOpenAshare&amp;type=date&amp;legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ZhiweiChen-coder%2FOpenAshare&amp;type=date&amp;theme=dark&amp;legend=top-left&amp;sealed_token=HpUKzflqLwOmi67eMCYybI9lGl01IzvSWjiqKMPgdC37PERZdLpmKc3alJ8CIdAo5_khIL1j6w9boS1gijuX0clL7AzJ-oz7991mt1YVSWvweecFZhBeuHbG4DIbC3482rLAKnAwQq6TERx2vNWkJDVQq8f5r19BwMcvHK4GD4kVbb9-8CaSJO6bW1fl" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ZhiweiChen-coder%2FOpenAshare&amp;type=date&amp;legend=top-left&amp;sealed_token=HpUKzflqLwOmi67eMCYybI9lGl01IzvSWjiqKMPgdC37PERZdLpmKc3alJ8CIdAo5_khIL1j6w9boS1gijuX0clL7AzJ-oz7991mt1YVSWvweecFZhBeuHbG4DIbC3482rLAKnAwQq6TERx2vNWkJDVQq8f5r19BwMcvHK4GD4kVbb9-8CaSJO6bW1fl" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ZhiweiChen-coder%2FOpenAshare&amp;type=date&amp;legend=top-left&amp;sealed_token=HpUKzflqLwOmi67eMCYybI9lGl01IzvSWjiqKMPgdC37PERZdLpmKc3alJ8CIdAo5_khIL1j6w9boS1gijuX0clL7AzJ-oz7991mt1YVSWvweecFZhBeuHbG4DIbC3482rLAKnAwQq6TERx2vNWkJDVQq8f5r19BwMcvHK4GD4kVbb9-8CaSJO6bW1fl" />
+ </picture>
+</a>
 </p>
 
 曲线由 [Star History](https://star-history.com/#ZhiweiChen-coder/OpenAshare&Date) 提供，会随公开 Star 数据更新。点击图表可查看交互式历史；如果这个项目对你有帮助，点一颗 Star 会直接推动下一段曲线。
