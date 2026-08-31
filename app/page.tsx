@@ -157,6 +157,25 @@ function resolveLanguage(lang: string | string[] | undefined): Language {
   return value === "en" ? "en" : "zh";
 }
 
+async function getGithubStars(): Promise<number | null> {
+  try {
+    const response = await fetch("https://api.github.com/repos/ZhiweiChen-coder/OpenAshare", {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2026-03-10",
+      },
+      next: { revalidate: 3600 },
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as { stargazers_count?: unknown };
+    return typeof data.stargazers_count === "number" ? data.stargazers_count : null;
+  } catch {
+    return null;
+  }
+}
+
 function GitHubIcon() {
   return (
     <svg height="18" viewBox="0 0 16 16" width="18" fill="currentColor" aria-hidden="true">
@@ -170,6 +189,8 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
   const language = resolveLanguage(params?.lang);
   const copy = landingCopy[language];
   const languageHref = language === "zh" ? "/?lang=en" : "/";
+  const githubStars = await getGithubStars();
+  const githubStarLabel = `★ ${githubStars ?? 63}`;
 
   return (
     <main className={styles.container} lang={copy.langAttr}>
@@ -191,7 +212,7 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
           <a className={styles.navGithub} href={githubUrl} target="_blank" rel="noopener noreferrer">
             <GitHubIcon />
             <span>{copy.githubCta}</span>
-            <b>★ 63</b>
+            <b>{githubStarLabel}</b>
           </a>
           <Link className={styles.languageLink} href={languageHref} aria-label={copy.languageLabel}>
             {language === "zh" ? copy.english : copy.chinese}
@@ -216,7 +237,7 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
             <a className={styles.githubButton} href={githubUrl} target="_blank" rel="noopener noreferrer">
               <GitHubIcon />
               <span>{copy.githubCta}</span>
-              <b>★ 63</b>
+              <b>{githubStarLabel}</b>
             </a>
           </div>
           <p className={styles.availability}>{copy.availability}</p>
@@ -250,7 +271,7 @@ export default async function LandingPage({ searchParams }: LandingPageProps) {
       <section className={styles.proof} aria-label="OpenAshare at a glance">
         {copy.proof.map((item) => (
           <div key={item.label}>
-            <strong>{item.value}</strong>
+            <strong>{item.label === "GitHub stars" ? githubStarLabel : item.value}</strong>
             <span>{item.label}</span>
           </div>
         ))}
