@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/logo.png" alt="OpenAshare Logo" width="96" />
+  <img src="public/favicon.svg" alt="OpenAshare Logo" width="128" />
 </p>
 
 <h1 align="center">OpenAshare</h1>
